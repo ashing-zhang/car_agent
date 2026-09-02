@@ -6,7 +6,7 @@
 
 from typing import Any
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 from app.context.schemas import VehicleState
 from app.tools.schemas import ToolResult

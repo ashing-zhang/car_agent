@@ -1,11 +1,21 @@
 # AutoAgent Docker Compose
 # 运行指南:
-#   启动基础设施: docker compose up -d postgres redis
+#   启动基础设施:        docker compose up -d postgres redis
 #   启动 API (首次或代码未变): docker compose up -d api
 #   代码变更后重启 API:        docker compose up -d --build api
+#   启动前端 (开发模式, 热更新):    docker compose up -d frontend
+#   前端依赖变更后重建:           docker compose up -d --build frontend
+#   查看前端日志:             docker compose logs -f frontend
+#   前端访问地址:             http://localhost:5173 (通过 Vite 代理转发至 api:8000)
+#   启动 Prometheus 监控:        docker compose up -d observability
+#   查看监控面板:             http://localhost:9090
+#   查看监控服务日志:           docker compose logs -f observability
+#   一次性启动全部服务:        docker compose up -d
 #   查看日志: docker compose logs -f api
 #   停止: docker compose down
 # 注意: 仿真环境变量由场景池(configs/scene_pool.yaml)提供,无需外部仿真器
+#       前端开发模式通过卷挂载(frontend:/app)实现热更新,生产环境应使用
+#       `npm run build` 输出 frontend/dist 后由静态服务器托管。
 
 services:
   postgres:

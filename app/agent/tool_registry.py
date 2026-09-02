@@ -7,7 +7,7 @@
 import logging
 from typing import Any
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 from app.tools.environment import EnvironmentService, get_environment_service
 from app.tools.media import MediaService, get_media_service
