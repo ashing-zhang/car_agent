@@ -1,0 +1,92 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a2027;
+  --panel-2: #222b34;
+  --border: #2d3744;
+  --text: #e6edf3;
+  --text-dim: #8b98a5;
+  --accent: #4fd1c5;
+  --accent-2: #38b2ac;
+  --danger: #f56565;
+  --warn: #ed8936;
+  --ok: #48bb78;
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  background: var(--panel-2);
+  color: var(--text);
+  transition: background 0.15s;
+}
+button:hover:not(:disabled) {
+  background: var(--border);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.primary {
+  background: var(--accent);
+  color: #0a1419;
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-2);
+}
+
+input,
+textarea {
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+}
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge.ok {
+  background: rgba(72, 187, 120, 0.18);
+  color: var(--ok);
+}
+.badge.error {
+  background: rgba(245, 101, 101, 0.18);
+  color: var(--danger);
+}
+
+.scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}

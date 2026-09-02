@@ -1,0 +1,96 @@
+# 场景池配置 - 替代 CARLA 仿真的环境变量来源
+# 运行指南:
+#   由 app/simulation/scene_pool.py 读取,每次 get_state 随机选取一个场景
+#   自定义场景: 在 scenes 列表中追加条目即可,vehicle/environment 字段均可缺省(使用默认值)
+#   scene.name 仅用于日志追踪,不参与业务逻辑
+
+scenes:
+  - name: "urban_clear_noon"
+    description: "城市道路,晴朗中午,中等交通"
+    vehicle:
+      speed_kmh: 42.0
+      battery_percent: 78.0
+      cabin_temperature_c: 24.5
+      ac_enabled: true
+      target_temperature_c: 24.0
+      latitude: 40.0123
+      longitude: 116.4567
+      current_road: "城市环路高架"
+    environment:
+      weather: "clear"
+      traffic_density: "medium"
+      road_work: false
+      pedestrians: true
+      confidence: 0.9
+
+  - name: "highway_sunny"
+    description: "高速公路,晴天,低交通"
+    vehicle:
+      speed_kmh: 108.0
+      battery_percent: 65.0
+      cabin_temperature_c: 22.0
+      ac_enabled: true
+      target_temperature_c: 23.0
+      latitude: 39.8871
+      longitude: 116.6312
+      current_road: "京哈高速 G1"
+    environment:
+      weather: "clear"
+      traffic_density: "low"
+      road_work: false
+      pedestrians: false
+      confidence: 0.92
+
+  - name: "rain_congested"
+    description: "雨天晚高峰,拥堵路段,道路施工"
+    vehicle:
+      speed_kmh: 12.0
+      battery_percent: 41.0
+      cabin_temperature_c: 20.5
+      ac_enabled: false
+      target_temperature_c: 24.0
+      latitude: 39.9219
+      longitude: 116.4435
+      current_road: "平安大街"
+    environment:
+      weather: "rain"
+      traffic_density: "high"
+      road_work: true
+      pedestrians: true
+      confidence: 0.87
+
+  - name: "night_city"
+    description: "夜间城市街道,行人密集"
+    vehicle:
+      speed_kmh: 28.0
+      battery_percent: 55.0
+      cabin_temperature_c: 23.0
+      ac_enabled: true
+      target_temperature_c: 23.5
+      latitude: 39.9087
+      longitude: 116.3975
+      current_road: "长安街辅路"
+    environment:
+      weather: "clear"
+      traffic_density: "medium"
+      road_work: false
+      pedestrians: true
+      confidence: 0.83
+
+  - name: "suburban_fog"
+    description: "郊区道路,大雾,无行人"
+    vehicle:
+      speed_kmh: 55.0
+      battery_percent: 88.0
+      cabin_temperature_c: 21.0
+      ac_enabled: false
+      target_temperature_c: 22.0
+      latitude: 40.1452
+      longitude: 116.2568
+      current_road: "京银路 G110"
+    environment:
+      weather: "fog"
+      traffic_density: "low"
+      road_work: false
+      pedestrians: false
+      confidence: 0.78

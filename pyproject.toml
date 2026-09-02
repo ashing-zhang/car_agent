@@ -1,0 +1,70 @@
+# AutoAgent - 场景池驱动的多模态个性化车载 Agent
+# 运行指南:
+#   安装: pip install -e ".[dev]"
+#   启动 API: python -m app.main
+#   运行 CLI: python -m app.cli
+#   运行测试: pytest
+#   启动 MCP: python -m app.mcp.server
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoagent"
+version = "0.1.0"
+description = "Multimodal personalized automotive agent driven by a simulation scene pool"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "AutoAgent" }]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.2.0",
+    "langchain-openai>=0.1.20",
+    "openai>=1.40.0",
+    "sqlalchemy>=2.0.30",
+    "psycopg2-binary>=2.9.9",
+    "pgvector>=0.3.0",
+    "redis>=5.0.0",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.1",
+    "mcp>=1.0.0",
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "prometheus-client>=0.20.0",
+    "structlog>=24.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+autoagent = "app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["tests*", "docs*", "scripts*", "configs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

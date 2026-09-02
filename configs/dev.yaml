@@ -1,0 +1,37 @@
+# 开发环境配置
+# 运行指南: 此文件由 app/config.py 自动加载,无需手动指定
+
+app:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "INFO"
+  environment: "development"
+
+llm:
+  temperature: 0.3
+  max_tokens: 2048
+  request_timeout: 30
+
+agent:
+  max_iterations: 10
+  max_tool_calls: 8
+  reflection_enabled: true
+
+memory:
+  retrieval_top_k: 5
+  min_confidence: 0.5
+  conflict_resolution: "latest_wins"
+
+policy:
+  temperature_min: 18
+  temperature_max: 30
+  volume_min: 0
+  volume_max: 40
+  safety_critical_disabled: true
+
+observability:
+  trace_enabled: true
+  metrics_enabled: true
+  structured_logging: true
+  trace_store_limit: 200
+  latency_buckets_ms: [50, 100, 250, 500, 1000, 2500, 5000, 10000]

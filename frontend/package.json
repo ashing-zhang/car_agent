@@ -1,0 +1,20 @@
+{
+  "name": "autoagent-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AutoAgent 车载 Agent Vue 3 前端界面",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "vue": "^3.5.0",
+    "axios": "^1.7.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.0",
+    "vite": "^5.4.0"
+  }
+}

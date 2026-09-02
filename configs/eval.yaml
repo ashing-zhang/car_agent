@@ -1,0 +1,30 @@
+# Evaluation 评估配置
+# 运行指南: python -m scripts.run_eval --config configs/eval.yaml
+
+dataset:
+  scenarios_dir: "app/evaluation/scenarios"
+  min_cases: 100
+  categories:
+    - vehicle_query
+    - vehicle_control
+    - navigation
+    - media
+    - memory
+    - multi_step
+    - multimodal
+    - ambiguous
+    - unsafe_request
+
+metrics:
+  intent_accuracy: true
+  tool_selection_accuracy: true
+  argument_accuracy: true
+  task_success_rate: true
+  memory_precision: true
+  memory_recall: true
+  hallucination_rate: true
+  latency_percentiles: [50, 95, 99]
+
+report:
+  output_dir: "reports"
+  formats: ["json", "csv"]
