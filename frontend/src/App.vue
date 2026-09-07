@@ -30,7 +30,7 @@ onMounted(refreshHealth)
         <span class="logo">🚗</span>
         <div>
           <h1>AutoAgent</h1>
-          <p class="sub">多模态个性化车载 Agent</p>
+          <p class="sub">个性化车载 Agent</p>
         </div>
       </div>
       <div class="health">

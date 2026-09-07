@@ -83,6 +83,7 @@ class MemoryConfig(BaseModel):
     retrieval_top_k: int = 5
     min_confidence: float = 0.5
     conflict_resolution: str = "latest_wins"
+    repository_backend: str = "in_memory"
 
 
 class PolicyConfig(BaseModel):
