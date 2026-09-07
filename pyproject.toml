@@ -1,4 +1,4 @@
-# AutoAgent - 场景池驱动的多模态个性化车载 Agent
+# AutoAgent - 场景池驱动的个性化车载 Agent
 # 运行指南:
 #   安装: pip install -e ".[dev]"
 #   启动 API: python -m app.main
@@ -47,6 +47,8 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=5.0.0",
     "ruff>=0.5.0",
+    "testcontainers>=3.10.0",
+    "testcontainers-postgres>=0.1.0",
 ]
 
 [project.scripts]
