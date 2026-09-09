@@ -48,7 +48,6 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.5.0",
     "testcontainers>=3.10.0",
-    "testcontainers-postgres>=0.1.0",
 ]
 
 [project.scripts]
