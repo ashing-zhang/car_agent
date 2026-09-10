@@ -37,6 +37,73 @@ PREFERENCE_PREDICATES: dict[str, tuple[str, ...]] = {
 }
 
 
+class PreferenceDisplay(BaseModel):
+    """偏好显示配置:中文标签与上下文模板(开闭原则:新增偏好仅需扩展此处与 PREFERENCE_PREDICATES)。"""
+
+    label: str
+    template: str
+
+
+PREFERENCE_DISPLAY: dict[str, PreferenceDisplay] = {
+    "preferred_temperature": PreferenceDisplay(
+        label="车内温度偏好",
+        template="已知用户偏好:车内温度 {value}{unit}。若用户表达冷热感受,优先采用该偏好温度设置空调。",
+    ),
+    "ac_mode": PreferenceDisplay(
+        label="空调模式偏好",
+        template="已知用户偏好:空调模式 {value}。若用户需要调节空调,优先使用此模式(制冷/制热/送风/自动/除湿)。",
+    ),
+    "fan_speed": PreferenceDisplay(
+        label="风速偏好",
+        template="已知用户偏好:空调风速 {value} 档。若用户开启或调节空调,优先使用该风速档位。",
+    ),
+    "seat_position": PreferenceDisplay(
+        label="座椅位置偏好",
+        template="已知用户偏好:座椅位置 {value}。若用户上车或调整座椅,可建议使用此预设位置。",
+    ),
+    "seat_heating": PreferenceDisplay(
+        label="座椅加热偏好",
+        template="已知用户偏好:座椅加热 {value}。若天气寒冷或用户提及座椅冷,优先开启对应档位的座椅加热。",
+    ),
+    "seat_ventilation": PreferenceDisplay(
+        label="座椅通风偏好",
+        template="已知用户偏好:座椅通风 {value}。若天气炎热或用户提及座椅闷热,优先开启座椅通风。",
+    ),
+    "seat_massage": PreferenceDisplay(
+        label="座椅按摩偏好",
+        template="已知用户偏好:座椅按摩 {value}。若用户长途驾驶或提及疲劳,可建议开启座椅按摩。",
+    ),
+    "preferred_volume": PreferenceDisplay(
+        label="音量偏好",
+        template="已知用户偏好:媒体音量 {value}。若用户播放媒体,优先设置为该音量。",
+    ),
+    "preferred_music_style": PreferenceDisplay(
+        label="音乐风格偏好",
+        template="已知用户偏好:音乐风格 {value}。若用户请求播放音乐,优先推荐该风格的歌曲或歌单。",
+    ),
+    "default_playlist": PreferenceDisplay(
+        label="默认歌单偏好",
+        template="已知用户偏好:默认歌单「{value}」。若用户未指定播放内容,可播放此歌单。",
+    ),
+    "preferred_radio": PreferenceDisplay(
+        label="电台偏好",
+        template="已知用户偏好:电台 {value}。若用户想听广播,优先推荐此电台。",
+    ),
+    "home_address": PreferenceDisplay(
+        label="家庭地址偏好",
+        template="已知用户偏好:家庭地址「{value}」。若用户提及回家,可直接导航到该地址。",
+    ),
+    "work_address": PreferenceDisplay(
+        label="工作地址偏好",
+        template="已知用户偏好:工作地址「{value}」。若用户提及上班/去公司,可直接导航到该地址。",
+    ),
+    "route_preference": PreferenceDisplay(
+        label="路线偏好",
+        template="已知用户偏好:路线策略 {value}。若用户发起导航,优先采用该路线偏好(高速优先/躲避拥堵/不走高速等)。",
+    ),
+}
+
+
 def memory_to_text(memory: "Memory") -> str:
     """将记忆条目序列化为自然语言文本,用于 embedding。"""
     type_label = {

@@ -5,6 +5,7 @@
 #   循环: retrieve_memory → agent ↔ tools → extract_memory → END
 # Phase 4 将加入 plan 节点扩展为完整图
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import TypedDict
@@ -16,8 +17,11 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from app.agent.tools import build_vehicle_tools
 from app.agent.tool_registry import ToolRegistry, get_tool_registry
 from app.llm.provider import LLMProvider, get_llm_provider
+from app.memory.models import PREFERENCE_DISPLAY, Memory
 from app.memory.service import get_memory_service
 from app.tools.vehicle import VehicleService, get_vehicle_service
+
+logger = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 SYSTEM_PROMPT = (PROMPT_DIR / "system.md").read_text(encoding="utf-8")
@@ -40,17 +44,39 @@ def _last_human_content(messages: list[BaseMessage]) -> str:
     return ""
 
 
+def _build_preference_context(user_id: str, service: object) -> str | None:
+    """遍历 PREFERENCE_DISPLAY 配置,检索并组装所有有效偏好的上下文描述(配置驱动)。"""
+    contexts: list[str] = []
+    for predicate, display in PREFERENCE_DISPLAY.items():
+        try:
+            pref: Memory | None = service.recall_preference(user_id, predicate)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Recall preference %s failed for user %s: %s", predicate, user_id, exc)
+            continue
+        if pref is None:
+            continue
+        try:
+            unit = pref.unit or ""
+            context = display.template.format(value=pref.value, unit=unit)
+            contexts.append(context)
+        except (KeyError, ValueError) as exc:
+            logger.warning("Format preference %s template failed: %s", predicate, exc)
+    if not contexts:
+        return None
+    logger.info("Loaded %d preferences for user=%s", len(contexts), user_id)
+    return "\n".join(contexts)
+
+
 def _make_retrieve_memory_node(memory_service: object | None = None) -> object:
-    """构造记忆检索节点:注入用户偏好到上下文。"""
+    """构造记忆检索节点:注入用户偏好到上下文(配置驱动,支持全部 14 种偏好)。"""
 
     def node(state: AgentGraphState) -> dict:
-        """检索用户偏好并注入为 SystemMessage。"""
+        """检索用户所有有效偏好并注入为 SystemMessage。"""
         user_id = state.get("user_id", "demo-user")
         service = memory_service if memory_service is not None else get_memory_service()
-        pref = service.recall_preference(user_id, "preferred_temperature")
-        if pref is None:
+        ctx = _build_preference_context(user_id, service)
+        if ctx is None:
             return {}
-        ctx = f"已知用户偏好:车内温度 {pref.value}℃。若用户表达冷热感受,优先采用该偏好温度。"
         return {"messages": [SystemMessage(content=ctx)]}
 
     return node
