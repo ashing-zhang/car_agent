@@ -1,0 +1,80 @@
+# 高并发测试配置文件
+# 运行指南: 此文件由 tests/unit/test_concurrent.py 加载,配置驱动测试参数
+# 可根据测试环境调整参数,无需修改代码
+
+# 并发测试基础参数
+concurrency:
+  # 并发用户数 (模拟同时访问的用户数量)
+  concurrent_users: 20
+  # 每个用户的请求次数
+  requests_per_user: 5
+  # 请求间的随机延迟范围 (秒),避免同时发起请求造成的同步冲击
+  request_jitter_min: 0.0
+  request_jitter_max: 0.1
+  # 整体超时时间 (秒)
+  overall_timeout: 120
+  # 单请求超时时间 (秒)
+  request_timeout: 30
+
+# 成功率和延迟阈值 (用于断言测试通过)
+thresholds:
+  # 最低成功率要求 (0.0 - 1.0)
+  min_success_rate: 0.95
+  # P50 延迟最大允许值 (毫秒)
+  max_p50_latency_ms: 2000
+  # P95 延迟最大允许值 (毫秒)
+  max_p95_latency_ms: 5000
+  # P99 延迟最大允许值 (毫秒)
+  max_p99_latency_ms: 10000
+
+# 健康检查端点测试配置
+health_endpoint:
+  enabled: true
+  path: "/api/v1/health"
+  method: "GET"
+
+# 就绪检查端点测试配置
+readiness_endpoint:
+  enabled: true
+  path: "/api/v1/health/ready"
+  method: "GET"
+
+# 车辆状态端点测试配置
+vehicle_status_endpoint:
+  enabled: true
+  path: "/api/v1/vehicle/status"
+  method: "GET"
+
+# 设置温度端点测试配置
+vehicle_temperature_endpoint:
+  enabled: true
+  path: "/api/v1/vehicle/temperature"
+  method: "POST"
+  # 测试用的温度值池 (从池中随机选取,符合 policy 范围 18-30)
+  temperature_values: [20.0, 22.0, 24.0, 25.0, 26.0, 28.0]
+
+# Agent Chat 端点测试配置 (使用 MockLLMProvider)
+agent_chat_endpoint:
+  enabled: true
+  path: "/api/v1/agent/chat"
+  method: "POST"
+  # 测试消息池 (从池中随机选取)
+  test_messages:
+    - "现在车速多少?"
+    - "把温度调到24度"
+    - "帮我开空调"
+    - "你好"
+    - "现在外面天气怎么样?"
+    - "放点音乐"
+    - "车内温度多少?"
+    - "周围环境怎么样?"
+
+# Agent Plan 端点测试配置 (使用 MockLLMProvider)
+agent_plan_endpoint:
+  enabled: true
+  path: "/api/v1/agent/plan"
+  method: "POST"
+  # 测试消息池
+  test_messages:
+    - "帮我规划一条去公司的路线,避开拥堵"
+    - "今天天气冷,先开空调,然后播放我喜欢的音乐"
