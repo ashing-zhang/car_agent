@@ -1,0 +1,43 @@
+# 数据库探查工具配置 - 配置驱动,配置与代码分离
+# 运行指南:
+#   通过此文件控制数据库探查行为,敏感信息(用户名/密码)由 .env 中的 POSTGRES_URL 提供
+#   修改此配置后无需改代码即可调整输出格式、行数限制等
+
+# 输出配置
+output:
+  # 输出格式: table(控制台表格) | json(JSON文件) | both(同时输出)
+  format: "both"
+  # JSON 输出目录(相对于项目根)
+  json_output_dir: "reports/db_inspect"
+  # 控制台输出时表记录的最大显示行数(避免大量记录刷屏)
+  max_rows_per_table_console: 50
+  # JSON 导出时表记录的最大行数(null 表示不限制)
+  max_rows_per_table_json: null
+
+# 探查范围
+inspection:
+  # 是否包含系统 schema(如 pg_catalog, information_schema)
+  include_system_schemas: false
+  # 只探查指定 schema 列表(空列表表示探查全部非系统 schema)
+  schemas: []
+  # 只探查指定表名列表(空列表表示探查全部表)
+  tables: []
+  # 是否导出表中的记录数据
+  include_table_data: true
+  # 是否导出索引信息
+  include_indexes: true
+  # 是否导出约束信息(主键、外键、唯一约束等)
+  include_constraints: true
+  # 大字段类型是否截断显示(bytea、超长 text 等)
+  truncate_large_fields: true
+  # 截断阈值(字符数)
+  truncate_threshold: 200
+
+# 数据库连接参数覆盖(可选,为空则使用 .env 中 POSTGRES_URL)
+connection:
+  # 示例: "postgresql+psycopg2://user:pass@host:port/dbname"
+  override_url: ""
+  # 连接超时秒数
+  connect_timeout: 10
+  # 查询超时秒数
+  statement_timeout: 300
