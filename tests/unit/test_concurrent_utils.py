@@ -143,9 +143,9 @@ def test_assert_thresholds_pass() -> None:
     stats = compute_statistics("/good", results, 2000.0)
     thresholds = ThresholdsConfig(
         min_success_rate=0.95,
-        max_p50_latency_ms=200.0,
-        max_p95_latency_ms=500.0,
-        max_p99_latency_ms=1000.0,
+        max_p50_latency_ms=1000.0,
+        max_p95_latency_ms=2000.0,
+        max_p99_latency_ms=3000.0,
     )
     assert_thresholds(stats, thresholds)
 

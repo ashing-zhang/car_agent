@@ -106,6 +106,14 @@ class ObservabilityConfig(BaseModel):
     latency_buckets_ms: list[float] = [50, 100, 250, 500, 1000, 2500, 5000, 10000]
 
 
+class SimulationConfig(BaseModel):
+    """仿真环境参数(车辆状态仓储后端、偏好初始化策略)。"""
+
+    state_store_backend: str = "in_memory"
+    apply_preference_on_session_start: bool = True
+    preference_based_ac_min_confidence: float = 0.6
+
+
 class AppYamlConfig(BaseModel):
     """从 configs/dev.yaml 加载的非敏感运行配置。"""
 
@@ -114,6 +122,7 @@ class AppYamlConfig(BaseModel):
     memory: MemoryConfig = MemoryConfig()
     policy: PolicyConfig = PolicyConfig()
     observability: ObservabilityConfig = ObservabilityConfig()
+    simulation: SimulationConfig = SimulationConfig()
 
 
 @lru_cache(maxsize=1)

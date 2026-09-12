@@ -65,6 +65,12 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
+markers = [
+    "concurrent: High concurrency / load testing scenarios (multiple users simultaneously)",
+]
+filterwarnings = [
+    "ignore:.*__fields__.*deprecated.*:pydantic.warnings.PydanticDeprecatedSince20:langchain_core\\.tools\\.base",
+]
 
 [tool.ruff]
 line-length = 100
