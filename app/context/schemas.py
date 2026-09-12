@@ -2,8 +2,58 @@
 # 运行指南: 被各 Adapter 转换为这些 schema,Agent 层只依赖这些类型
 
 from datetime import datetime, timezone
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+class WiperLevel(StrEnum):
+    """雨刮档位枚举。"""
+
+    OFF = "off"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    AUTO = "auto"
+
+
+class LightMode(StrEnum):
+    """车灯模式枚举。"""
+
+    OFF = "off"
+    PARKING = "parking"
+    LOW_BEAM = "low_beam"
+    HIGH_BEAM = "high_beam"
+    AUTO = "auto"
+
+
+class SeatPosition(BaseModel):
+    """座椅位置(前后滑动百分比与靠背角度)。"""
+
+    slide_percent: int = Field(default=50, ge=0, le=100)
+    backrest_angle_deg: int = Field(default=90, ge=0, le=180)
+
+
+class WindowsState(BaseModel):
+    """四扇车窗开启百分比(0=全关,100=全开)。"""
+
+    driver_front: int = Field(default=0, ge=0, le=100)
+    passenger_front: int = Field(default=0, ge=0, le=100)
+    driver_rear: int = Field(default=0, ge=0, le=100)
+    passenger_rear: int = Field(default=0, ge=0, le=100)
+
+
+class SeatsState(BaseModel):
+    """座椅状态集合(驾驶位与副驾驶位)。"""
+
+    driver_position: SeatPosition = SeatPosition()
+    passenger_position: SeatPosition = SeatPosition()
+    driver_ventilation_level: int = Field(default=0, ge=0, le=3)
+    passenger_ventilation_level: int = Field(default=0, ge=0, le=3)
+    driver_massage_level: int = Field(default=0, ge=0, le=3)
+    passenger_massage_level: int = Field(default=0, ge=0, le=3)
+    driver_heating_level: int = Field(default=0, ge=0, le=3)
+    passenger_heating_level: int = Field(default=0, ge=0, le=3)
 
 
 class VehicleState(BaseModel):
@@ -18,6 +68,12 @@ class VehicleState(BaseModel):
     longitude: float
     current_road: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    seats: SeatsState = SeatsState()
+    windows: WindowsState = WindowsState()
+    trunk_open: bool = False
+    wiper_level: WiperLevel = WiperLevel.OFF
+    light_mode: LightMode = LightMode.OFF
 
 
 class EnvironmentState(BaseModel):

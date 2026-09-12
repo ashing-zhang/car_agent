@@ -95,6 +95,19 @@ class PolicyConfig(BaseModel):
     volume_max: int = 40
     safety_critical_disabled: bool = True
 
+    seat_slide_min: int = 0
+    seat_slide_max: int = 100
+    seat_backrest_min_deg: int = 0
+    seat_backrest_max_deg: int = 180
+    seat_level_min: int = 0
+    seat_level_max: int = 3
+
+    window_open_min_percent: int = 0
+    window_open_max_percent: int = 100
+
+    max_speed_for_trunk_kmh: float = 5.0
+    max_speed_for_window_kmh: float = 120.0
+
 
 class ObservabilityConfig(BaseModel):
     """可观测性参数(规格第20节,Phase 8)。"""

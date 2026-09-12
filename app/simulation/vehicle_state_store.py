@@ -35,6 +35,27 @@ class VehicleStateOverride(BaseModel):
     target_temperature_c: float | None = None
     cabin_temperature_c: float | None = None
 
+    driver_seat_slide_percent: int | None = None
+    driver_seat_backrest_angle_deg: int | None = None
+    passenger_seat_slide_percent: int | None = None
+    passenger_seat_backrest_angle_deg: int | None = None
+
+    driver_seat_ventilation_level: int | None = None
+    passenger_seat_ventilation_level: int | None = None
+    driver_seat_massage_level: int | None = None
+    passenger_seat_massage_level: int | None = None
+    driver_seat_heating_level: int | None = None
+    passenger_seat_heating_level: int | None = None
+
+    window_driver_front: int | None = None
+    window_passenger_front: int | None = None
+    window_driver_rear: int | None = None
+    window_passenger_rear: int | None = None
+
+    trunk_open: bool | None = None
+    wiper_level: str | None = None
+    light_mode: str | None = None
+
 
 class VehicleStateStore(Protocol):
     """车辆状态仓储协议(支持开闭原则,可扩展 Redis 等后端)。"""

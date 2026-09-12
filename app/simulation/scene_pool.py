@@ -27,6 +27,27 @@ class SceneVehicleSpec(BaseModel):
     longitude: float = 116.4567
     current_road: str | None = None
 
+    driver_seat_slide_percent: int = Field(default=50, ge=0, le=100)
+    driver_seat_backrest_angle_deg: int = Field(default=90, ge=0, le=180)
+    passenger_seat_slide_percent: int = Field(default=50, ge=0, le=100)
+    passenger_seat_backrest_angle_deg: int = Field(default=90, ge=0, le=180)
+
+    driver_seat_ventilation_level: int = Field(default=0, ge=0, le=3)
+    passenger_seat_ventilation_level: int = Field(default=0, ge=0, le=3)
+    driver_seat_massage_level: int = Field(default=0, ge=0, le=3)
+    passenger_seat_massage_level: int = Field(default=0, ge=0, le=3)
+    driver_seat_heating_level: int = Field(default=0, ge=0, le=3)
+    passenger_seat_heating_level: int = Field(default=0, ge=0, le=3)
+
+    window_driver_front: int = Field(default=0, ge=0, le=100)
+    window_passenger_front: int = Field(default=0, ge=0, le=100)
+    window_driver_rear: int = Field(default=0, ge=0, le=100)
+    window_passenger_rear: int = Field(default=0, ge=0, le=100)
+
+    trunk_open: bool = False
+    wiper_level: str = "off"
+    light_mode: str = "off"
+
 
 class SceneEnvironmentSpec(BaseModel):
     """场景环境状态规格(对应 configs/scene_pool.yaml 的 environment 字段)。"""

@@ -140,6 +140,14 @@ class SceneVehicleProvider:
 
     def get_state(self) -> VehicleState:
         """随机选取场景并按优先级叠加用户覆盖+偏好,返回车辆状态。"""
+        from app.context.schemas import (
+            LightMode,
+            SeatsState,
+            SeatPosition,
+            WindowsState,
+            WiperLevel,
+        )
+
         user_id, session_id = self._resolve_context()
         self._ensure_session_initialized(user_id, session_id)
         scene = self._pool.pick()
@@ -148,6 +156,31 @@ class SceneVehicleProvider:
 
         def _pick(scene_val: object, override_val: object) -> object:
             return override_val if override_val is not None else scene_val
+
+        seats = SeatsState(
+            driver_position=SeatPosition(
+                slide_percent=int(_pick(vehicle.driver_seat_slide_percent, override.driver_seat_slide_percent)),
+                backrest_angle_deg=int(_pick(vehicle.driver_seat_backrest_angle_deg, override.driver_seat_backrest_angle_deg)),
+            ),
+            passenger_position=SeatPosition(
+                slide_percent=int(_pick(vehicle.passenger_seat_slide_percent, override.passenger_seat_slide_percent)),
+                backrest_angle_deg=int(_pick(vehicle.passenger_seat_backrest_angle_deg, override.passenger_seat_backrest_angle_deg)),
+            ),
+            driver_ventilation_level=int(_pick(vehicle.driver_seat_ventilation_level, override.driver_seat_ventilation_level)),
+            passenger_ventilation_level=int(_pick(vehicle.passenger_seat_ventilation_level, override.passenger_seat_ventilation_level)),
+            driver_massage_level=int(_pick(vehicle.driver_seat_massage_level, override.driver_seat_massage_level)),
+            passenger_massage_level=int(_pick(vehicle.passenger_seat_massage_level, override.passenger_seat_massage_level)),
+            driver_heating_level=int(_pick(vehicle.driver_seat_heating_level, override.driver_seat_heating_level)),
+            passenger_heating_level=int(_pick(vehicle.passenger_seat_heating_level, override.passenger_seat_heating_level)),
+        )
+        windows = WindowsState(
+            driver_front=int(_pick(vehicle.window_driver_front, override.window_driver_front)),
+            passenger_front=int(_pick(vehicle.window_passenger_front, override.window_passenger_front)),
+            driver_rear=int(_pick(vehicle.window_driver_rear, override.window_driver_rear)),
+            passenger_rear=int(_pick(vehicle.window_passenger_rear, override.window_passenger_rear)),
+        )
+        wiper_level_raw = _pick(vehicle.wiper_level, override.wiper_level)
+        light_mode_raw = _pick(vehicle.light_mode, override.light_mode)
 
         state = VehicleState(
             speed_kmh=vehicle.speed_kmh,
@@ -159,6 +192,11 @@ class SceneVehicleProvider:
             longitude=vehicle.longitude,
             current_road=vehicle.current_road,
             timestamp=datetime.now(timezone.utc),
+            seats=seats,
+            windows=windows,
+            trunk_open=bool(_pick(vehicle.trunk_open, override.trunk_open)),
+            wiper_level=WiperLevel(str(wiper_level_raw)),
+            light_mode=LightMode(str(light_mode_raw)),
         )
         logger.debug(
             "Vehicle state user=%s session=%s scene=%s: %.0f km/h, AC=%s, T=%.1f°C",
@@ -191,6 +229,165 @@ class SceneVehicleProvider:
         logger.info(
             "Scene vehicle AC %s (user=%s session=%s backend=%s)",
             "enabled" if enabled else "disabled", user_id, session_id, self._store.backend,
+        )
+
+    def set_seat_position(
+        self,
+        seat: str,
+        slide_percent: int | None = None,
+        backrest_angle_deg: int | None = None,
+    ) -> None:
+        """设置座椅位置(driver/passenger),保存到会话级状态仓储。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        seat = seat.lower()
+        if seat == "driver":
+            if slide_percent is not None:
+                override.driver_seat_slide_percent = slide_percent
+            if backrest_angle_deg is not None:
+                override.driver_seat_backrest_angle_deg = backrest_angle_deg
+        elif seat == "passenger":
+            if slide_percent is not None:
+                override.passenger_seat_slide_percent = slide_percent
+            if backrest_angle_deg is not None:
+                override.passenger_seat_backrest_angle_deg = backrest_angle_deg
+        else:
+            msg = f"Unknown seat: {seat} (supported: driver, passenger)"
+            logger.error(msg)
+            raise ValueError(msg)
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle %s seat position overridden (user=%s session=%s)",
+            seat, user_id, session_id,
+        )
+
+    def set_seat_ventilation(self, seat: str, level: int) -> None:
+        """设置座椅通风档位(driver/passenger, 0-3)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        seat = seat.lower()
+        if seat == "driver":
+            override.driver_seat_ventilation_level = level
+        elif seat == "passenger":
+            override.passenger_seat_ventilation_level = level
+        else:
+            msg = f"Unknown seat: {seat} (supported: driver, passenger)"
+            logger.error(msg)
+            raise ValueError(msg)
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle %s seat ventilation overridden to level %d (user=%s session=%s)",
+            seat, level, user_id, session_id,
+        )
+
+    def set_seat_massage(self, seat: str, level: int) -> None:
+        """设置座椅按摩档位(driver/passenger, 0-3)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        seat = seat.lower()
+        if seat == "driver":
+            override.driver_seat_massage_level = level
+        elif seat == "passenger":
+            override.passenger_seat_massage_level = level
+        else:
+            msg = f"Unknown seat: {seat} (supported: driver, passenger)"
+            logger.error(msg)
+            raise ValueError(msg)
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle %s seat massage overridden to level %d (user=%s session=%s)",
+            seat, level, user_id, session_id,
+        )
+
+    def set_seat_heating(self, seat: str, level: int) -> None:
+        """设置座椅加热档位(driver/passenger, 0-3)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        seat = seat.lower()
+        if seat == "driver":
+            override.driver_seat_heating_level = level
+        elif seat == "passenger":
+            override.passenger_seat_heating_level = level
+        else:
+            msg = f"Unknown seat: {seat} (supported: driver, passenger)"
+            logger.error(msg)
+            raise ValueError(msg)
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle %s seat heating overridden to level %d (user=%s session=%s)",
+            seat, level, user_id, session_id,
+        )
+
+    def set_window(self, window: str, open_percent: int) -> None:
+        """设置车窗开启百分比(window: driver_front/passenger_front/driver_rear/passenger_rear/all)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        window = window.lower()
+        if window == "all":
+            override.window_driver_front = open_percent
+            override.window_passenger_front = open_percent
+            override.window_driver_rear = open_percent
+            override.window_passenger_rear = open_percent
+        elif window == "driver_front":
+            override.window_driver_front = open_percent
+        elif window == "passenger_front":
+            override.window_passenger_front = open_percent
+        elif window == "driver_rear":
+            override.window_driver_rear = open_percent
+        elif window == "passenger_rear":
+            override.window_passenger_rear = open_percent
+        else:
+            msg = (
+                f"Unknown window: {window} "
+                f"(supported: all, driver_front, passenger_front, driver_rear, passenger_rear)"
+            )
+            logger.error(msg)
+            raise ValueError(msg)
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle window %s overridden to %d%% (user=%s session=%s)",
+            window, open_percent, user_id, session_id,
+        )
+
+    def set_trunk(self, open: bool) -> None:
+        """开启或关闭后备箱。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        override.trunk_open = open
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle trunk %s (user=%s session=%s backend=%s)",
+            "opened" if open else "closed", user_id, session_id, self._store.backend,
+        )
+
+    def set_wiper(self, level: str) -> None:
+        """设置雨刮档位(off/low/medium/high/auto)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        override.wiper_level = level.lower()
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle wiper overridden to %s (user=%s session=%s backend=%s)",
+            level, user_id, session_id, self._store.backend,
+        )
+
+    def set_light(self, mode: str) -> None:
+        """设置车灯模式(off/parking/low_beam/high_beam/auto)。"""
+        user_id, session_id = self._resolve_context()
+        self._ensure_session_initialized(user_id, session_id)
+        override = self._store.load_override(user_id, session_id)
+        override.light_mode = mode.lower()
+        self._store.save_override(user_id, session_id, override)
+        logger.info(
+            "Scene vehicle light overridden to %s (user=%s session=%s backend=%s)",
+            mode, user_id, session_id, self._store.backend,
         )
 
 
