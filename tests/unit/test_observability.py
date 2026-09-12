@@ -169,3 +169,119 @@ def test_trace_detail_after_recording() -> None:
     body = resp.json()
     assert body["request_id"] == trace.request_id
     assert body["final_response"] == "hi"
+
+
+# ---------------- 二级索引与用户/会话查询 ----------------
+
+
+def test_trace_recorder_query_by_user() -> None:
+    """按 user_id 查询应仅返回该用户的 trace,并按时间倒序。"""
+    rec = TraceRecorder(store_limit=10)
+    for i in range(3):
+        t = rec.start_trace(session_id="s1", user_id="alice", model="m", input_text=f"a{i}")
+        rec.end_trace(t, final_response="ok", latency_ms=1.0)
+    for i in range(2):
+        t = rec.start_trace(session_id="s2", user_id="bob", model="m", input_text=f"b{i}")
+        rec.end_trace(t, final_response="ok", latency_ms=1.0)
+
+    alice_traces = rec.by_user("alice", limit=10)
+    bob_traces = rec.by_user("bob", limit=10)
+    assert len(alice_traces) == 3
+    assert len(bob_traces) == 2
+    assert all(t.user_id == "alice" for t in alice_traces)
+    assert all(t.user_id == "bob" for t in bob_traces)
+    assert alice_traces[0].input == "a2"
+    assert alice_traces[-1].input == "a0"
+
+
+def test_trace_recorder_query_by_session() -> None:
+    """按 session_id 查询应仅返回该会话内的 trace。"""
+    rec = TraceRecorder(store_limit=10)
+    for i in range(2):
+        t = rec.start_trace(session_id="session-a", user_id="u1", model="m", input_text=f"sa{i}")
+        rec.end_trace(t, final_response="ok", latency_ms=1.0)
+    t = rec.start_trace(session_id="session-b", user_id="u1", model="m", input_text="sb0")
+    rec.end_trace(t, final_response="ok", latency_ms=1.0)
+
+    sess_a = rec.by_session("session-a", limit=10)
+    sess_b = rec.by_session("session-b", limit=10)
+    assert len(sess_a) == 2
+    assert len(sess_b) == 1
+    assert sess_a[0].input == "sa1"
+    assert sess_b[0].session_id == "session-b"
+
+
+def test_trace_recorder_query_unknown_user_returns_empty() -> None:
+    """未知 user_id / session_id 查询应返回空列表。"""
+    rec = TraceRecorder(store_limit=5)
+    t = rec.start_trace(session_id="s1", user_id="u1", model="m", input_text="x")
+    rec.end_trace(t, final_response="ok")
+    assert rec.by_user("ghost") == []
+    assert rec.by_session("ghost-session") == []
+
+
+def test_trace_recorder_ring_buffer_updates_secondary_indexes() -> None:
+    """环形缓冲淘汰时 user/session 二级索引同步清理。"""
+    rec = TraceRecorder(store_limit=2)
+    uid_order = [("u1", "s1"), ("u2", "s2"), ("u3", "s3")]
+    for uid, sid in uid_order:
+        t = rec.start_trace(session_id=sid, user_id=uid, model="m", input_text=uid)
+        rec.end_trace(t, final_response="ok", latency_ms=1.0)
+
+    assert rec.by_user("u1") == []
+    assert len(rec.by_user("u2")) == 1
+    assert len(rec.by_user("u3")) == 1
+    assert rec.by_session("s1") == []
+    assert len(rec.by_session("s2")) == 1
+
+
+def test_trace_recorder_user_query_limit_works() -> None:
+    """user/session 查询应支持 limit 参数截断。"""
+    rec = TraceRecorder(store_limit=20)
+    for i in range(5):
+        t = rec.start_trace(session_id="s", user_id="u", model="m", input_text=f"m{i}")
+        rec.end_trace(t, final_response="ok", latency_ms=1.0)
+
+    assert len(rec.by_user("u", limit=2)) == 2
+    assert len(rec.by_session("s", limit=3)) == 3
+
+
+# ---------------- 线程安全单例 ----------------
+
+
+def test_singleton_returns_same_instance() -> None:
+    """连续调用应返回同一实例。"""
+    a = get_trace_recorder()
+    b = get_trace_recorder()
+    assert a is b
+    c = get_metrics_registry()
+    d = get_metrics_registry()
+    assert c is d
+
+
+def test_singleton_thread_safety_concurrent_init() -> None:
+    """多线程并发首次调用应只创建一个实例。"""
+    import threading
+    import importlib
+    import app.observability.recorder as rec_mod
+
+    created_instances: list[object] = []
+    orig = rec_mod._trace_recorder
+    try:
+        rec_mod._trace_recorder = None
+
+        def worker() -> None:
+            inst = rec_mod.get_trace_recorder()
+            created_instances.append(inst)
+
+        threads = [threading.Thread(target=worker) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        first = created_instances[0]
+        assert all(inst is first for inst in created_instances)
+        assert len({id(x) for x in created_instances}) == 1
+    finally:
+        rec_mod._trace_recorder = orig

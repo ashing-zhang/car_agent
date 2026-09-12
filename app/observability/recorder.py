@@ -188,6 +188,8 @@ class TraceRecorder:
         """初始化空收集器与容量上限。"""
         self._traces: list[Trace] = []
         self._by_id: dict[str, int] = {}
+        self._by_user: dict[str, list[int]] = defaultdict(list)
+        self._by_session: dict[str, list[int]] = defaultdict(list)
         self._store_limit = store_limit
         self._lock = threading.Lock()
 
@@ -255,9 +257,50 @@ class TraceRecorder:
                 if len(self._traces) >= self._store_limit:
                     oldest = self._traces.pop(0)
                     self._by_id.pop(oldest.request_id, None)
+                    self._remove_from_secondary_index(oldest.user_id, oldest.session_id, 0)
                     self._by_id = {k: v - 1 for k, v in self._by_id.items()}
-                self._by_id[trace.request_id] = len(self._traces)
+                    self._shift_secondary_indexes()
+                new_idx = len(self._traces)
+                self._by_id[trace.request_id] = new_idx
+                self._by_user[trace.user_id].append(new_idx)
+                self._by_session[trace.session_id].append(new_idx)
                 self._traces.append(trace)
+
+    def _remove_from_secondary_index(self, user_id: str, session_id: str, idx: int) -> None:
+        """从二级索引中移除指定位置的记录(内部调用,需持有锁)。"""
+        user_list = self._by_user.get(user_id)
+        if user_list:
+            user_list[:] = [i for i in user_list if i != idx]
+            if not user_list:
+                self._by_user.pop(user_id, None)
+        session_list = self._by_session.get(session_id)
+        if session_list:
+            session_list[:] = [i for i in session_list if i != idx]
+            if not session_list:
+                self._by_session.pop(session_id, None)
+
+    def _shift_secondary_indexes(self) -> None:
+        """环形缓冲淘汰首条后,所有位置-1(内部调用,需持有锁)。"""
+        for uid in list(self._by_user.keys()):
+            self._by_user[uid] = [i - 1 for i in self._by_user[uid] if i > 0]
+            if not self._by_user[uid]:
+                self._by_user.pop(uid, None)
+        for sid in list(self._by_session.keys()):
+            self._by_session[sid] = [i - 1 for i in self._by_session[sid] if i > 0]
+            if not self._by_session[sid]:
+                self._by_session.pop(sid, None)
+
+    def by_user(self, user_id: str, limit: int = 20) -> list[Trace]:
+        """按 user_id 查询该用户最近 N 条 trace(按时间倒序)。"""
+        with self._lock:
+            idxs = self._by_user.get(user_id, [])
+            return [self._traces[i] for i in reversed(idxs[-limit:])]
+
+    def by_session(self, session_id: str, limit: int = 20) -> list[Trace]:
+        """按 session_id 查询该会话最近 N 条 trace(按时间倒序)。"""
+        with self._lock:
+            idxs = self._by_session.get(session_id, [])
+            return [self._traces[i] for i in reversed(idxs[-limit:])]
 
     def get(self, request_id: str) -> Trace | None:
         """按 request_id 查询 trace。"""
@@ -295,20 +338,27 @@ class TraceRecorder:
 
 _trace_recorder: TraceRecorder | None = None
 _metrics_registry: MetricsRegistry | None = None
+_singleton_lock = threading.Lock()
 
 
 def get_trace_recorder() -> TraceRecorder:
-    """获取 TraceRecorder 单例。"""
+    """获取 TraceRecorder 单例(线程安全)。"""
     global _trace_recorder
-    if _trace_recorder is None:
-        cfg = get_app_config().observability
-        _trace_recorder = TraceRecorder(store_limit=cfg.trace_store_limit)
+    if _trace_recorder is not None:
+        return _trace_recorder
+    with _singleton_lock:
+        if _trace_recorder is None:
+            cfg = get_app_config().observability
+            _trace_recorder = TraceRecorder(store_limit=cfg.trace_store_limit)
     return _trace_recorder
 
 
 def get_metrics_registry() -> MetricsRegistry:
-    """获取 MetricsRegistry 单例。"""
+    """获取 MetricsRegistry 单例(线程安全)。"""
     global _metrics_registry
-    if _metrics_registry is None:
-        _metrics_registry = MetricsRegistry()
+    if _metrics_registry is not None:
+        return _metrics_registry
+    with _singleton_lock:
+        if _metrics_registry is None:
+            _metrics_registry = MetricsRegistry()
     return _metrics_registry
