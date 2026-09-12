@@ -13,6 +13,12 @@ from datetime import datetime, timezone
 
 from app.context.schemas import EnvironmentState, VehicleState
 from app.simulation.scene_pool import ScenePool
+from app.simulation.vehicle_state_store import (
+    VehicleStateOverride,
+    VehicleStateStore,
+    get_session_context,
+    get_vehicle_state_store,
+)
 
 
 logger = logging.getLogger(__name__)
