@@ -1,9 +1,9 @@
 # Phase 6+ Memory 扩展测试 - 多偏好提取 + 向量语义检索
 # 运行指南: pytest tests/unit/test_memory_phase6.py -v
+# 说明: 测试使用 HashEmbeddingStub (tests/conftest.py 定义)作为向量化桩,
+#      保证在无 Embedding API Key 时仍可验证检索流程与数据流正确性。
 
 from app.memory.embedding import (
-    MockEmbeddingProvider,
-    get_embedding_provider,
     reset_embedding_provider,
 )
 from app.memory.extractor import MemoryExtractor
@@ -15,13 +15,15 @@ from app.memory.repository import (
 )
 from app.memory.retriever import MemoryRetriever
 from app.memory.service import MemoryService, reset_memory_service
+from tests.conftest import HashEmbeddingStub
 
 
-def _make_svc() -> tuple[MemoryService, InMemoryMemoryRepository, MockEmbeddingProvider]:
+def _make_svc() -> tuple[MemoryService, InMemoryMemoryRepository, HashEmbeddingStub]:
+    """构造独立的 MemoryService 与 InMemory repo(使用 HashEmbeddingStub 桩)。"""
     reset_memory_service()
     reset_memory_repository()
     reset_embedding_provider()
-    embed = MockEmbeddingProvider()
+    embed = HashEmbeddingStub()
     repo = build_repository("in_memory")
     assert isinstance(repo, InMemoryMemoryRepository)
     retriever = MemoryRetriever(repo, top_k=5, embedding_provider=embed)
@@ -30,9 +32,9 @@ def _make_svc() -> tuple[MemoryService, InMemoryMemoryRepository, MockEmbeddingP
     return svc, repo, embed
 
 
-def test_embedding_provider_deterministic() -> None:
-    """相同文本 -> 相同向量;不同文本 -> 不同向量。"""
-    p = MockEmbeddingProvider()
+def test_embedding_stub_deterministic() -> None:
+    """相同文本 -> 相同向量;不同文本 -> 不同向量;维度 1536;L2 归一化。"""
+    p = HashEmbeddingStub()
     v1 = p.embed("用户偏好温度24度")
     v2 = p.embed("用户偏好温度24度")
     v3 = p.embed("去公司导航")
@@ -124,7 +126,7 @@ def test_semantic_vector_retrieval_in_memory() -> None:
 
 def test_keyword_fallback_works() -> None:
     """无 embedding 时仍可通过关键词检索。"""
-    embed = MockEmbeddingProvider()
+    embed = HashEmbeddingStub()
     repo = InMemoryMemoryRepository()
     mem = Memory(
         user_id="u1", session_id="s1",

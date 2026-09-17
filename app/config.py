@@ -166,11 +166,9 @@ class ReportConfig(BaseModel):
 
 
 class EvaluatorRuntimeConfig(BaseModel):
-    """评估运行时配置：控制是否启用真实 LLM 及 LLM Planner。"""
+    """评估运行时配置(所有评估均使用真实 LLM + LLMPlanner)。"""
 
-    use_real_llm: bool = True
-    use_real_planner: bool = True
-    force_mock: bool = False
+    enabled: bool = True
 
 
 class EvalYamlConfig(BaseModel):

@@ -3,6 +3,7 @@
 #   前置: 本机启动 Docker Desktop (Linux 容器模式)
 #   运行: pytest tests/integration/test_memory_pgvector.py -v --tb=short
 #   说明: 使用 testcontainers 动态拉起 pgvector/pgvector:pg16 镜像,测试结束自动销毁
+#         使用 HashEmbeddingStub (tests/conftest.py) 提供确定性向量,不依赖真实 Embedding API Key
 #   跳过: 无 Docker 时自动 skip,不影响 CI 中无容器环境的测试
 
 import os
@@ -12,7 +13,8 @@ import pytest
 
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
-from app.memory.embedding import MockEmbeddingProvider, reset_embedding_provider
+from app.memory.embedding import reset_embedding_provider
+from tests.conftest import HashEmbeddingStub
 from app.memory.models import Memory, MemoryType
 from app.memory.orm import reset_db_singletons
 from app.memory.repository import PostgreSQLMemoryRepository, reset_memory_repository
@@ -182,6 +184,7 @@ def _make_repo():
 
 
 def _make_memory(user_id: str, predicate: str, value, text: str) -> Memory:
+    """构造一个带确定性 embedding 的 Memory 对象(使用 HashEmbeddingStub 桩)。"""
     mem = Memory(
         user_id=user_id,
         session_id="sess-1",
@@ -191,7 +194,7 @@ def _make_memory(user_id: str, predicate: str, value, text: str) -> Memory:
         value=value,
         confidence=0.9,
     )
-    embedder = MockEmbeddingProvider()
+    embedder = HashEmbeddingStub()
     mem.embedding = embedder.embed(text)
     return mem
 
@@ -266,14 +269,14 @@ def test_find_similar_cosine_distance_retrieves_relevant_memory(
 ) -> None:
     """pgvector find_similar: 余弦距离排序返回相似度分 + 记忆对象。
 
-    说明: MockEmbeddingProvider 使用哈希伪随机向量,不同文本间无真实语义相似度,
+    说明: HashEmbeddingStub 使用哈希伪随机向量,不同文本间无真实语义相似度,
     因此此处不做语义排名断言,只验证 pgvector 向量检索功能的正确性:
     1) 每条结果都包含 (similarity_float, Memory) 二元组
     2) 相似度分数按降序排列
     3) 返回结果只包含当前 user_id 且记忆的 embedding 列已正确存入
     """
     repo = _make_repo()
-    embedder = MockEmbeddingProvider()
+    embedder = HashEmbeddingStub()
     mems = [
         _make_memory(
             "u1", "preferred_temperature", 24.0, "用户偏好车内温度24摄氏度"
@@ -311,7 +314,7 @@ def test_find_similar_respects_user_isolation(pg_connection_url) -> None:
     repo.save(m_alice)
     repo.save(m_bob)
 
-    embedder = MockEmbeddingProvider()
+    embedder = HashEmbeddingStub()
     q_vec = embedder.embed("空调温度多少度")
     alice_results = repo.find_similar(
         "alice", q_vec, top_k=5, min_similarity=0.0

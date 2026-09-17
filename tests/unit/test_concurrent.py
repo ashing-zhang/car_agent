@@ -3,7 +3,8 @@
 #   运行所有并发测试: pytest tests/unit/test_concurrent.py -v
 #   指定标记运行: pytest tests/unit/test_concurrent.py -v -m "concurrent"
 #   调整并发参数: 修改 configs/test_concurrent.yaml 配置文件
-#   注意: 测试使用 MockLLMProvider,不依赖外部 LLM API Key
+# 说明: Agent 端点使用真实 LLM;在未配置 LLM API Key 的环境中,Agent Chat/Plan 端点会返回 500。
+#   健康检查、车辆状态、温度设置等端点不依赖 LLM,可稳定用于高并发基准。
 
 import asyncio
 import logging
@@ -255,7 +256,7 @@ async def test_concurrent_agent_chat_endpoint(
     concurrency: ConcurrencyConfig,
     thresholds: ThresholdsConfig,
 ) -> None:
-    """高并发测试:多个用户同时与 Agent 聊天 /api/v1/agent/chat (MockLLM)。"""
+    """高并发测试:多个用户同时与 Agent 聊天 /api/v1/agent/chat (需真实 LLM API Key)。"""
     cfg = concurrent_config.agent_chat_endpoint
     if not cfg.enabled:
         pytest.skip("agent_chat endpoint disabled in config")
@@ -274,7 +275,7 @@ async def test_concurrent_agent_plan_endpoint(
     concurrency: ConcurrencyConfig,
     thresholds: ThresholdsConfig,
 ) -> None:
-    """高并发测试:多个用户同时请求 Agent 规划任务 /api/v1/agent/plan (MockLLM)。"""
+    """高并发测试:多个用户同时请求 Agent 规划任务 /api/v1/agent/plan (需真实 LLM API Key)。"""
     cfg = concurrent_config.agent_plan_endpoint
     if not cfg.enabled:
         pytest.skip("agent_plan endpoint disabled in config")

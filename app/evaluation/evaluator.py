@@ -3,10 +3,9 @@
 #   from app.evaluation.evaluator import Evaluator, run_evaluation
 #   results = Evaluator().run()
 #   report = run_evaluation()
-# 配置驱动 (configs/eval.yaml -> evaluator 段):
-#   use_real_llm:    true 使用 get_llm_provider() 的真实/自动降级 LLM; false 使用 MockLLMProvider
-#   use_real_planner:true 使用 LLMPlanner(委托 LLM); false 使用规则 Planner
-#   force_mock:      true  强制 get_llm_provider 内部也走 Mock (配合 use_real_llm=false 做纯离线测评)
+# 运行环境:
+#   - 必须配置真实 LLM API Key(.env 中 DASHSCOPE_API_KEY / LLM_API_KEY)
+#   - 多工具场景走 LLMPlanner(含规则 Planner fallback),单工具场景走 ReAct Agent
 
 import logging
 import time
@@ -16,12 +15,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from app.agent.graph import build_agent
 from app.agent.llm_planner import LLMPlanner
 from app.agent.plan_graph import PlanExecuteState, build_plan_agent
-from app.agent.planner import Planner, get_planner
 from app.agent.tool_registry import ToolRegistry
 from app.config import AppYamlConfig, EvalYamlConfig, get_app_config, get_eval_config
 from app.evaluation.dataset import EvalCase, load_scenarios
 from app.evaluation.metrics import CaseResult, MetricsReport, compute_metrics
-from app.llm.provider import LLMProvider, MockLLMProvider, get_llm_provider
+from app.llm.provider import get_llm_provider
 from app.memory.extractor import MemoryExtractor
 from app.memory.repository import InMemoryMemoryRepository
 from app.memory.retriever import MemoryRetriever
@@ -39,39 +37,18 @@ SAFETY_CRITICAL_TOOLS: set[str] = {"steering", "brake", "throttle"}
 
 
 class Evaluator:
-    """评估器:按配置选择 LLM 与 Planner,对每个场景执行并记录工具调用与延迟。"""
+    """评估器:使用真实 LLM + LLMPlanner(规则 fallback)对每个场景执行并记录。"""
 
     def __init__(
         self,
         app_config: AppYamlConfig | None = None,
         eval_config: EvalYamlConfig | None = None,
     ) -> None:
-        """加载应用与评估配置,可选注入以便测试。"""
+        """加载应用与评估配置,并在初始化阶段预检 LLM。"""
         self._config: AppYamlConfig = app_config or get_app_config()
         self._eval_cfg: EvalYamlConfig = eval_config or get_eval_config()
-        runtime = self._eval_cfg.evaluator
-        logger.info(
-            "Evaluator initialized: use_real_llm=%s, use_real_planner=%s, force_mock=%s",
-            runtime.use_real_llm,
-            runtime.use_real_planner,
-            runtime.force_mock,
-        )
-
-    def _choose_llm(self, registry: ToolRegistry) -> LLMProvider:
-        """依据评估配置选择 LLM;若启用真实 LLM 并自动降级到 Mock,会在日志中提示。"""
-        runtime = self._eval_cfg.evaluator
-        if runtime.use_real_llm:
-            llm = get_llm_provider(force_mock=runtime.force_mock)
-            bound = llm.bind_tools(registry.tools)
-            return bound
-        llm = MockLLMProvider()
-        return llm.bind_tools(registry.tools)
-
-    def _choose_planner(self, llm: LLMProvider, registry: ToolRegistry) -> Planner | LLMPlanner:
-        """依据评估配置选择规则 Planner 或 LLMPlanner。"""
-        if self._eval_cfg.evaluator.use_real_planner:
-            return LLMPlanner(llm, registry)
-        return get_planner()
+        self._llm_prototype = get_llm_provider()
+        logger.info("Evaluator initialized with real LLM (%s)", type(self._llm_prototype).__name__)
 
     def _make_shared_services(
         self,
@@ -84,7 +61,7 @@ class Evaluator:
         return service, registry
 
     def _make_react_agent(self) -> object:
-        """构造隔离的 ReAct Agent(独立 memory + 按配置选择 LLM + 全工具 registry)。"""
+        """构造隔离的 ReAct Agent(独立 memory + 真实 LLM + 全工具 registry)。"""
         repo = InMemoryMemoryRepository()
         mem = MemoryService(
             MemoryExtractor(self._config.memory.min_confidence),
@@ -92,14 +69,13 @@ class Evaluator:
             repo,
         )
         service, registry = self._make_shared_services()
-        llm = self._choose_llm(registry)
-        return build_agent(service, llm, memory_service=mem, registry=registry)
+        return build_agent(service, self._llm_prototype, memory_service=mem, registry=registry)
 
     def _make_plan_agent(self) -> tuple[object, ToolRegistry]:
-        """构造隔离的 Plan-Execute Agent(按配置选择 Planner 与 registry)。"""
+        """构造隔离的 Plan-Execute Agent(LLMPlanner + registry)。"""
         _, registry = self._make_shared_services()
-        llm = self._choose_llm(registry)
-        planner = self._choose_planner(llm, registry)
+        llm = self._llm_prototype.bind_tools(registry.tools)
+        planner = LLMPlanner(llm, registry)
         return build_plan_agent(planner=planner, registry=registry), registry
 
     def evaluate_case(self, case: EvalCase) -> CaseResult:

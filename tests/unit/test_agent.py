@@ -1,20 +1,21 @@
-# Agent 单元测试 - 使用 MockLLM + 场景池车辆,不依赖 API key 与外部仿真器
+# Agent 单元测试 - 使用 IntentStubLLM 桩 + 场景池车辆,不依赖 API key 与外部仿真器
 # 运行指南: pytest tests/unit/test_agent.py -v
+# IntentStubLLM 定义于 tests/conftest.py,用于验证 Agent 图/数据流/Policy 等逻辑正确性
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.graph import build_agent
 from app.config import PolicyConfig
-from app.llm.provider import MockLLMProvider
 from app.simulation.providers import SceneVehicleProvider
 from app.simulation.scene_pool import get_scene_pool
 from app.tools.vehicle import VehicleService
+from tests.conftest import IntentStubLLM
 
 
 def _make_agent():
-    """构造基于 Mock LLM 与场景池车辆的测试 Agent。"""
+    """构造基于 IntentStubLLM 测试桩与场景池车辆的测试 Agent。"""
     service = VehicleService(SceneVehicleProvider(get_scene_pool()), PolicyConfig())
-    llm = MockLLMProvider()
+    llm = IntentStubLLM()
     return build_agent(service, llm)
 
 

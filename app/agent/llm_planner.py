@@ -11,6 +11,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from app.agent.planner import Planner, get_planner
 from app.agent.tool_registry import ToolRegistry
 from app.llm.provider import LLMProvider
 from app.tools.schemas import PlanStep
@@ -32,14 +33,20 @@ _SYSTEM_PROMPT: str = """你是一名车辆智能助手的任务规划器(Planne
 
 
 class LLMPlanner:
-    """基于 LLM 的多步任务规划器,委托 LLM 生成 PlanStep 列表。"""
+    """基于 LLM 的多步任务规划器,委托 LLM 生成 PlanStep 列表,失败时降级到规则 Planner。"""
 
-    def __init__(self, llm: LLMProvider, registry: ToolRegistry) -> None:
-        """注入 LLMProvider 与 ToolRegistry,内部构建工具描述。"""
+    def __init__(
+        self,
+        llm: LLMProvider,
+        registry: ToolRegistry,
+        rule_fallback: Planner | None = None,
+    ) -> None:
+        """注入 LLMProvider、ToolRegistry 与可选的规则 Planner 降级器。"""
         self._llm = llm
         self._registry = registry
+        self._fallback: Planner = rule_fallback or get_planner()
         self._tool_desc: str = self._build_tool_descriptions()
-        logger.info("LLMPlanner initialized with %d available tools", len(registry.tools))
+        logger.info("LLMPlanner initialized with %d available tools (rule fallback enabled)", len(registry.tools))
 
     def _build_tool_descriptions(self) -> str:
         """从 ToolRegistry 中提取工具名/说明/参数格式化为可读文本。"""
@@ -60,7 +67,7 @@ class LLMPlanner:
         return "\n".join(lines)
 
     def plan(self, user_message: str, user_id: str = "demo-user") -> list[PlanStep]:
-        """委托 LLM 根据用户消息生成有序 PlanStep 列表;最多重试 2 次。"""
+        """委托 LLM 根据用户消息生成有序 PlanStep 列表;最多重试 2 次,失败则降级到规则 Planner。"""
         system_prompt = _SYSTEM_PROMPT.format(tool_descriptions=self._tool_desc)
         messages = [
             SystemMessage(content=system_prompt),
@@ -73,13 +80,15 @@ class LLMPlanner:
                 response: AIMessage = self._llm.invoke(messages)
                 content = response.content if isinstance(response.content, str) else str(response.content)
                 steps = self._parse_steps(content)
-                logger.info(
-                    "LLMPlanner generated %d steps for user=%s attempt=%d",
-                    len(steps),
-                    user_id,
-                    attempt,
-                )
-                return steps
+                if steps:
+                    logger.info(
+                        "LLMPlanner generated %d steps for user=%s attempt=%d",
+                        len(steps),
+                        user_id,
+                        attempt,
+                    )
+                    return steps
+                logger.warning("LLMPlanner returned empty plan on attempt %d, continuing retry", attempt)
             except Exception as exc:  # noqa: BLE001 - 重试循环需要捕获任意 LLM/解析错误
                 last_error = str(exc)
                 logger.warning("LLMPlanner plan attempt %d failed: %s", attempt, exc)
@@ -89,8 +98,15 @@ class LLMPlanner:
                         content=f"之前的输出格式错误({exc}),请重新只输出合法 JSON 数组,不要任何额外文字。"
                     )
                 )
-        logger.error("LLMPlanner failed after retries, returning empty plan. last_error=%s", last_error)
-        return []
+        logger.warning(
+            "LLMPlanner exhausted retries (last_error=%s), falling back to rule Planner",
+            last_error,
+        )
+        rule_steps = self._fallback.plan(user_message, user_id)
+        valid_names = set(self._registry.names)
+        filtered = [s for s in rule_steps if s.tool in valid_names]
+        logger.info("Rule fallback produced %d steps for user=%s", len(filtered), user_id)
+        return filtered
 
     def _parse_steps(self, content: str) -> list[PlanStep]:
         """从 LLM 输出文本中清洗并解析 JSON 为 PlanStep 列表。"""

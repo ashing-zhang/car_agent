@@ -1,12 +1,13 @@
-# Memory 模块单元测试 - 使用独立 service 实例,不依赖全局单例与外部服务
+# Memory 模块单元测试 - 使用独立 service 实例与 IntentStubLLM 桩,不依赖全局单例与外部服务
 # 运行指南: pytest tests/unit/test_memory.py -v
+# IntentStubLLM 定义于 tests/conftest.py,用于驱动 Agent 图的执行流程,验证记忆注入逻辑
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.graph import build_agent
 from app.config import PolicyConfig
-from app.llm.provider import MockLLMProvider
 from app.memory.extractor import MemoryExtractor
+from tests.conftest import IntentStubLLM
 from app.memory.models import Memory, MemoryType
 from app.memory.repository import InMemoryMemoryRepository
 from app.memory.retriever import MemoryRetriever
@@ -83,7 +84,7 @@ def test_personalized_agent_uses_memory() -> None:
     """验证跨会话个性化:第一次存偏好24,第二次"有点冷"用24(规格 Demo C)。"""
     mem_service, _ = _make_service()
     service = VehicleService(SceneVehicleProvider(get_scene_pool()), PolicyConfig())
-    llm = MockLLMProvider()
+    llm = IntentStubLLM()
     agent = build_agent(service, llm, memory_service=mem_service)
 
     agent.invoke({"messages": [HumanMessage(content="我喜欢车内保持24度")], "user_id": "u1", "session_id": "s1"})
@@ -102,7 +103,7 @@ def test_no_preference_falls_back_to_default() -> None:
     """验证无偏好时"有点冷"回退默认24。"""
     mem_service, _ = _make_service()
     service = VehicleService(SceneVehicleProvider(get_scene_pool()), PolicyConfig())
-    llm = MockLLMProvider()
+    llm = IntentStubLLM()
     agent = build_agent(service, llm, memory_service=mem_service)
     result = agent.invoke({"messages": [HumanMessage(content="有点冷")], "user_id": "u2", "session_id": "s1"})
     found_temp: float | None = None

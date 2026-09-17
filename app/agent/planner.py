@@ -11,9 +11,13 @@ from app.tools.schemas import PlanStep
 
 logger = logging.getLogger(__name__)
 
-DEST_KEYWORDS = ("去", "导航到", "出发去", "回", "前往")
-MEDIA_KEYWORDS = ("音乐", "播放", "歌单", "听")
-TEMP_KEYWORDS = ("温度", "冷", "热", "调到", "调成")
+DEST_KEYWORDS = ("导航到", "导航去", "去", "回", "前往", "出发去", "怎么去", "到")
+DEST_STOP_WORDS = (
+    "顺便", "然后", "同时", "路上", "途中", "的路上", "的时候",
+    "并", "且", "和", "跟", "还有", "再", "还", "，", ",", "。", ".", "？", "?",
+)
+MEDIA_KEYWORDS = ("音乐", "播放", "歌单", "听", "放点", "放首")
+TEMP_KEYWORDS = ("温度", "冷", "热", "调到", "调成", "设为", "保持", "习惯", "喜欢", "平时")
 
 
 class Planner:
@@ -50,19 +54,26 @@ class Planner:
         return steps
 
     def _extract_destination(self, text: str) -> str | None:
-        """从消息中提取目的地。"""
+        """从消息中提取目的地，按最早出现的停止词截断。"""
+        best_dest: str | None = None
+        best_keyword_pos: int = -1
         for kw in DEST_KEYWORDS:
             idx = text.find(kw)
-            if idx >= 0:
-                rest = text[idx + len(kw):]
-                for stop in ("顺便", "然后", "同时", "，", ",", "。", "."):
-                    pos = rest.find(stop)
-                    if pos >= 0:
-                        rest = rest[:pos]
-                rest = rest.strip()
-                if rest:
-                    return rest
-        return None
+            if idx < 0:
+                continue
+            if best_keyword_pos >= 0 and idx >= best_keyword_pos:
+                continue
+            rest = text[idx + len(kw):]
+            earliest_stop = len(rest)
+            for stop in DEST_STOP_WORDS:
+                pos = rest.find(stop)
+                if 0 <= pos < earliest_stop:
+                    earliest_stop = pos
+            rest = rest[:earliest_stop].strip()
+            if rest and rest not in ("哪", "哪里", "哪儿", "什么"):
+                best_dest = rest
+                best_keyword_pos = idx
+        return best_dest
 
     def _extract_playlist(self, text: str) -> str | None:
         """从消息中提取播放列表名。"""
@@ -75,11 +86,12 @@ class Planner:
         return "默认歌单"
 
     def _extract_temperature(self, text: str) -> float | None:
-        """从消息中提取目标温度。"""
-        if not any(k in text for k in TEMP_KEYWORDS):
-            return None
-        match = re.search(r"(\d+(?:\.\d+)?)\s*度?", text)
-        if match:
+        """从消息中提取目标温度，支持显式数字与冷/热/偏好类表达。"""
+        has_temp_kw = any(k in text for k in TEMP_KEYWORDS)
+        match = re.search(r"(\d+(?:\.\d+)?)\s*度", text)
+        if match and has_temp_kw:
+            return float(match.group(1))
+        if match and any(k in text for k in ("保持", "喜欢", "习惯", "平时", "设", "调")):
             return float(match.group(1))
         if "冷" in text:
             return 24.0

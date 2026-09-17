@@ -53,7 +53,7 @@ vehicle_temperature_endpoint:
   # 测试用的温度值池 (从池中随机选取,符合 policy 范围 18-30)
   temperature_values: [20.0, 22.0, 24.0, 25.0, 26.0, 28.0]
 
-# Agent Chat 端点测试配置 (使用 MockLLMProvider)
+# Agent Chat 端点测试配置 (使用真实 LLM,需要配置 DASHSCOPE_API_KEY/LLM_API_KEY)
 agent_chat_endpoint:
   enabled: true
   path: "/api/v1/agent/chat"
@@ -69,7 +69,7 @@ agent_chat_endpoint:
     - "车内温度多少?"
     - "周围环境怎么样?"
 
-# Agent Plan 端点测试配置 (使用 MockLLMProvider)
+# Agent Plan 端点测试配置 (使用真实 LLM,需要配置 DASHSCOPE_API_KEY/LLM_API_KEY)
 agent_plan_endpoint:
   enabled: true
   path: "/api/v1/agent/plan"

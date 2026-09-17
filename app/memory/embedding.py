@@ -1,10 +1,9 @@
 # Memory Embedding Provider - 文本向量化抽象层
 # 运行指南:
-#   默认: get_embedding_provider() 依据 .env 选择 DashScope兼容 或 Mock
-#   无 API key 时自动降级为 MockEmbeddingProvider,使用伪随机向量
+#   get_embedding_provider() 依据 .env 加载 DashScope/OpenAI 兼容端点 Embedding
+#   未配置 API Key 时抛出 EmbeddingConfigurationError,禁止静默降级
 #   用于 pgvector 语义检索: memory_text -> vector(1536)
 
-import hashlib
 import logging
 from typing import Protocol
 
@@ -16,6 +15,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_DIM = 1536
 DEFAULT_EMBEDDING_MODEL = "text-embedding-v2"
+
+_MISSING_KEY_HINT = (
+    "未检测到 Embedding API Key。请在项目根目录的 .env 文件中配置以下任一环境变量:\n"
+    "  - DASHSCOPE_API_KEY=your_aliyun_dashscope_api_key (阿里云百炼, 自动使用 dashscope_base_url)\n"
+    "  - LLM_API_KEY=your_custom_api_key (配合 LLM_BASE_URL 使用)"
+)
+
+
+class EmbeddingConfigurationError(RuntimeError):
+    """Embedding 配置错误(如缺少 API Key),用于调用方捕获并展示用户提示。"""
 
 
 class EmbeddingProvider(Protocol):
@@ -46,6 +55,9 @@ class DashScopeEmbeddingProvider:
         api_key: str,
         model: str = DEFAULT_EMBEDDING_MODEL,
     ) -> None:
+        """初始化 Embedding 客户端,空 API Key 立即报错。"""
+        if not api_key:
+            raise EmbeddingConfigurationError(_MISSING_KEY_HINT)
         self._client = OpenAI(base_url=base_url, api_key=api_key)
         self._model = model
         logger.info(
@@ -55,60 +67,30 @@ class DashScopeEmbeddingProvider:
         )
 
     def embed(self, text: str) -> list[float]:
+        """对单条文本执行 Embedding。"""
         resp = self._client.embeddings.create(model=self._model, input=[text])
         return resp.data[0].embedding
 
     def embed_many(self, texts: list[str]) -> list[list[float]]:
+        """对批量文本执行 Embedding,空列表快速返回。"""
         if not texts:
             return []
         resp = self._client.embeddings.create(model=self._model, input=texts)
         return [item.embedding for item in resp.data]
 
 
-class MockEmbeddingProvider:
-    """基于文本哈希的伪随机向量实现,用于测试与无 API key 场景。
-
-    对相同文本返回确定性向量,保证测试可重复;向量维度与生产一致(1536)。
-    """
-
-    dimension: int = DEFAULT_EMBEDDING_DIM
-
-    def __init__(self, seed: int = 42) -> None:
-        self._seed = seed
-        logger.info("MockEmbeddingProvider initialized: dim=%d", self.dimension)
-
-    def embed(self, text: str) -> list[float]:
-        return self._hash_to_vector(text)
-
-    def embed_many(self, texts: list[str]) -> list[list[float]]:
-        return [self._hash_to_vector(t) for t in texts]
-
-    def _hash_to_vector(self, text: str) -> list[float]:
-        vec: list[float] = []
-        h = hashlib.sha256((f"{self._seed}:" + text).encode("utf-8")).digest()
-        for i in range(self.dimension):
-            byte_idx = i % len(h)
-            shift = (i // len(h)) % 8
-            val = ((h[byte_idx] >> shift) & 0xFF) / 255.0
-            vec.append((val - 0.5) * 2.0)
-        norm = sum(v * v for v in vec) ** 0.5 or 1.0
-        return [v / norm for v in vec]
-
-
 _default_provider: EmbeddingProvider | None = None
 
 
-def get_embedding_provider(force_mock: bool = False) -> EmbeddingProvider:
-    """获取默认 Embedding Provider 单例,无 API key 时降级为 Mock。"""
+def get_embedding_provider() -> EmbeddingProvider:
+    """获取默认 Embedding Provider 单例;缺少 API Key 时抛出 EmbeddingConfigurationError。"""
     global _default_provider
     if _default_provider is not None:
         return _default_provider
     settings = get_settings()
     api_key = settings.resolved_llm_api_key()
-    if force_mock or not api_key:
-        logger.info("Using MockEmbeddingProvider (no API key or forced mock)")
-        _default_provider = MockEmbeddingProvider()
-        return _default_provider
+    if not api_key:
+        raise EmbeddingConfigurationError(_MISSING_KEY_HINT)
     _default_provider = DashScopeEmbeddingProvider(
         base_url=settings.resolved_llm_base_url(),
         api_key=api_key,
