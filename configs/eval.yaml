@@ -28,3 +28,8 @@ metrics:
 report:
   output_dir: "reports"
   formats: ["json", "csv"]
+
+evaluator:
+  use_real_llm: false
+  use_real_planner: false
+  force_mock: true

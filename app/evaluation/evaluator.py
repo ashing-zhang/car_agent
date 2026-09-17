@@ -3,26 +3,31 @@
 #   from app.evaluation.evaluator import Evaluator, run_evaluation
 #   results = Evaluator().run()
 #   report = run_evaluation()
-# 多步场景用 plan-execute,单工具场景用 ReAct(MockLLM),不依赖外部 API
+# 配置驱动 (configs/eval.yaml -> evaluator 段):
+#   use_real_llm:    true 使用 get_llm_provider() 的真实/自动降级 LLM; false 使用 MockLLMProvider
+#   use_real_planner:true 使用 LLMPlanner(委托 LLM); false 使用规则 Planner
+#   force_mock:      true  强制 get_llm_provider 内部也走 Mock (配合 use_real_llm=false 做纯离线测评)
 
 import logging
 import time
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.agent.graph import build_agent
-from app.agent.plan_graph import run_plan
+from app.agent.llm_planner import LLMPlanner
+from app.agent.plan_graph import PlanExecuteState, build_plan_agent
+from app.agent.planner import Planner, get_planner
 from app.agent.tool_registry import ToolRegistry
-from app.simulation.providers import SceneVehicleProvider
-from app.simulation.scene_pool import get_scene_pool
-from app.config import get_app_config
+from app.config import AppYamlConfig, EvalYamlConfig, get_app_config, get_eval_config
 from app.evaluation.dataset import EvalCase, load_scenarios
 from app.evaluation.metrics import CaseResult, MetricsReport, compute_metrics
-from app.llm.provider import MockLLMProvider
+from app.llm.provider import LLMProvider, MockLLMProvider, get_llm_provider
 from app.memory.extractor import MemoryExtractor
 from app.memory.repository import InMemoryMemoryRepository
 from app.memory.retriever import MemoryRetriever
 from app.memory.service import MemoryService
+from app.simulation.providers import SceneVehicleProvider
+from app.simulation.scene_pool import get_scene_pool
 from app.tools.environment import get_environment_service
 from app.tools.media import get_media_service
 from app.tools.navigation import get_navigation_service
@@ -30,53 +35,110 @@ from app.tools.vehicle import VehicleService
 
 logger = logging.getLogger(__name__)
 
-SAFETY_CRITICAL_TOOLS = {"steering", "brake", "throttle"}
+SAFETY_CRITICAL_TOOLS: set[str] = {"steering", "brake", "throttle"}
 
 
 class Evaluator:
-    """评估器:对每个场景选择合适 Agent 并记录工具调用与延迟。"""
+    """评估器:按配置选择 LLM 与 Planner,对每个场景执行并记录工具调用与延迟。"""
 
-    def __init__(self) -> None:
-        """加载应用配置。"""
-        self._config = get_app_config()
+    def __init__(
+        self,
+        app_config: AppYamlConfig | None = None,
+        eval_config: EvalYamlConfig | None = None,
+    ) -> None:
+        """加载应用与评估配置,可选注入以便测试。"""
+        self._config: AppYamlConfig = app_config or get_app_config()
+        self._eval_cfg: EvalYamlConfig = eval_config or get_eval_config()
+        runtime = self._eval_cfg.evaluator
+        logger.info(
+            "Evaluator initialized: use_real_llm=%s, use_real_planner=%s, force_mock=%s",
+            runtime.use_real_llm,
+            runtime.use_real_planner,
+            runtime.force_mock,
+        )
+
+    def _choose_llm(self, registry: ToolRegistry) -> LLMProvider:
+        """依据评估配置选择 LLM;若启用真实 LLM 并自动降级到 Mock,会在日志中提示。"""
+        runtime = self._eval_cfg.evaluator
+        if runtime.use_real_llm:
+            llm = get_llm_provider(force_mock=runtime.force_mock)
+            bound = llm.bind_tools(registry.tools)
+            return bound
+        llm = MockLLMProvider()
+        return llm.bind_tools(registry.tools)
+
+    def _choose_planner(self, llm: LLMProvider, registry: ToolRegistry) -> Planner | LLMPlanner:
+        """依据评估配置选择规则 Planner 或 LLMPlanner。"""
+        if self._eval_cfg.evaluator.use_real_planner:
+            return LLMPlanner(llm, registry)
+        return get_planner()
+
+    def _make_shared_services(
+        self,
+    ) -> tuple[VehicleService, ToolRegistry]:
+        """构造隔离的 VehicleService 与 ToolRegistry(每个评估 case 独立)。"""
+        service = VehicleService(SceneVehicleProvider(get_scene_pool()), self._config.policy)
+        registry = ToolRegistry(
+            service, get_navigation_service(), get_media_service(), get_environment_service()
+        )
+        return service, registry
 
     def _make_react_agent(self) -> object:
-        """构造隔离的 ReAct Agent(独立 memory + MockLLM + 全工具 registry)。"""
+        """构造隔离的 ReAct Agent(独立 memory + 按配置选择 LLM + 全工具 registry)。"""
         repo = InMemoryMemoryRepository()
         mem = MemoryService(
             MemoryExtractor(self._config.memory.min_confidence),
             MemoryRetriever(repo, self._config.memory.retrieval_top_k),
             repo,
         )
-        service = VehicleService(SceneVehicleProvider(get_scene_pool()), self._config.policy)
-        llm = MockLLMProvider()
-        registry = ToolRegistry(
-            service, get_navigation_service(), get_media_service(), get_environment_service()
-        )
+        service, registry = self._make_shared_services()
+        llm = self._choose_llm(registry)
         return build_agent(service, llm, memory_service=mem, registry=registry)
 
+    def _make_plan_agent(self) -> tuple[object, ToolRegistry]:
+        """构造隔离的 Plan-Execute Agent(按配置选择 Planner 与 registry)。"""
+        _, registry = self._make_shared_services()
+        llm = self._choose_llm(registry)
+        planner = self._choose_planner(llm, registry)
+        return build_plan_agent(planner=planner, registry=registry), registry
+
     def evaluate_case(self, case: EvalCase) -> CaseResult:
-        """执行单个场景并返回结果。"""
+        """执行单个场景并返回结果;多工具走 Plan-Execute,单工具走 ReAct。"""
         start = time.perf_counter()
         actual_tools: list[str] = []
         actual_args: list[dict] = []
 
         use_plan = len(case.expected_tools) > 1
-        if use_plan:
-            state = run_plan(case.user, "eval-user")
-            for tc in state.get("tool_calls", []):
-                actual_tools.append(tc.name)
-                actual_args.append(tc.arguments)
-        else:
-            agent = self._make_react_agent()
-            result = agent.invoke(
-                {"messages": [HumanMessage(content=case.user)], "user_id": "eval-user", "session_id": "eval"}
-            )
-            for msg in result.get("messages", []):
-                if isinstance(msg, AIMessage) and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        actual_tools.append(tc["name"])
-                        actual_args.append(tc["args"])
+        try:
+            if use_plan:
+                plan_agent, _ = self._make_plan_agent()
+                state: PlanExecuteState = plan_agent.invoke(
+                    {
+                        "messages": [HumanMessage(content=case.user)],
+                        "user_id": "eval-user",
+                        "session_id": f"eval-plan-{case.id}",
+                    }
+                )
+                for tc in state.get("tool_calls", []):
+                    actual_tools.append(tc.name)
+                    actual_args.append(tc.arguments)
+            else:
+                agent = self._make_react_agent()
+                result: dict[str, list[BaseMessage]] = agent.invoke(
+                    {
+                        "messages": [HumanMessage(content=case.user)],
+                        "user_id": "eval-user",
+                        "session_id": f"eval-react-{case.id}",
+                    }
+                )
+                for msg in result.get("messages", []):
+                    if isinstance(msg, AIMessage) and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            actual_tools.append(tc["name"])
+                            actual_args.append(tc["args"])
+        except Exception:
+            logger.exception("Case %s execution raised", case.id)
+            raise
 
         latency = (time.perf_counter() - start) * 1000
         expected_set = set(case.expected_tools)
@@ -98,14 +160,14 @@ class Evaluator:
         )
 
     def run(self, cases: list[EvalCase] | None = None) -> list[CaseResult]:
-        """运行全部场景。"""
+        """运行全部场景,异常不会中断整体评估。"""
         cases = cases or load_scenarios()
         results: list[CaseResult] = []
         for case in cases:
             try:
                 results.append(self.evaluate_case(case))
-            except Exception as exc:
-                logger.exception("Case %s failed: %s", case.id, exc)
+            except Exception:
+                logger.exception("Case %s failed", case.id)
                 results.append(CaseResult(case=case, success=False, latency_ms=0.0))
         return results
 

@@ -127,6 +127,61 @@ class SimulationConfig(BaseModel):
     preference_based_ac_min_confidence: float = 0.6
 
 
+class DatasetConfig(BaseModel):
+    """评估数据集参数。"""
+
+    scenarios_dir: str = "app/evaluation/scenarios"
+    min_cases: int = 100
+    categories: list[str] = [
+        "vehicle_query",
+        "vehicle_control",
+        "navigation",
+        "media",
+        "memory",
+        "multi_step",
+        "multimodal",
+        "ambiguous",
+        "unsafe_request",
+    ]
+
+
+class MetricsConfig(BaseModel):
+    """评估指标开关。"""
+
+    intent_accuracy: bool = True
+    tool_selection_accuracy: bool = True
+    argument_accuracy: bool = True
+    task_success_rate: bool = True
+    memory_precision: bool = True
+    memory_recall: bool = True
+    hallucination_rate: bool = True
+    latency_percentiles: list[int] = [50, 95, 99]
+
+
+class ReportConfig(BaseModel):
+    """评估报告输出。"""
+
+    output_dir: str = "reports"
+    formats: list[str] = ["json", "csv"]
+
+
+class EvaluatorRuntimeConfig(BaseModel):
+    """评估运行时配置：控制是否启用真实 LLM 及 LLM Planner。"""
+
+    use_real_llm: bool = False
+    use_real_planner: bool = False
+    force_mock: bool = True
+
+
+class EvalYamlConfig(BaseModel):
+    """从 configs/eval.yaml 加载的评估完整配置。"""
+
+    dataset: DatasetConfig = DatasetConfig()
+    metrics: MetricsConfig = MetricsConfig()
+    report: ReportConfig = ReportConfig()
+    evaluator: EvaluatorRuntimeConfig = EvaluatorRuntimeConfig()
+
+
 class AppYamlConfig(BaseModel):
     """从 configs/dev.yaml 加载的非敏感运行配置。"""
 
@@ -158,3 +213,9 @@ def load_yaml_config(filename: str = "dev.yaml") -> dict:
 def get_app_config() -> AppYamlConfig:
     """获取应用 yaml 配置单例。"""
     return AppYamlConfig(**load_yaml_config("dev.yaml"))
+
+
+@lru_cache(maxsize=1)
+def get_eval_config() -> EvalYamlConfig:
+    """获取评估 yaml 配置单例 (configs/eval.yaml)。"""
+    return EvalYamlConfig(**load_yaml_config("eval.yaml"))
