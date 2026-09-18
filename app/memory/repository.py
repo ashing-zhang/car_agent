@@ -1,8 +1,7 @@
 # Memory Repository - 记忆持久化(规格 Rule 7: Service → Repository → Database)
 # 运行指南:
-#   默认 InMemoryMemoryRepository,不依赖外部数据库(Rule 5)
-#   Phase 6+: 可切换为 PostgreSQLMemoryRepository (pgvector 语义检索)
-#   通过配置 memory.repository_backend 或 build_repository() 构造
+#   企业级统一使用 PostgreSQLMemoryRepository (pgvector 语义检索)
+#   通过 build_repository() 或 get_memory_repository() 构造实例
 
 import logging
 from datetime import datetime, timezone
@@ -54,78 +53,8 @@ class MemoryRepository(Protocol):
         ...
 
 
-class InMemoryMemoryRepository:
-    """基于内存字典的 Memory 仓储实现,无需外部依赖。"""
-
-    backend: str = "in_memory"
-
-    def __init__(self) -> None:
-        """初始化按 user_id 索引的存储。"""
-        self._store: dict[str, list[Memory]] = {}
-
-    def save(self, memory: Memory) -> Memory:
-        """保存记忆(追加,冲突由 temporal 层处理)。"""
-        self._store.setdefault(memory.user_id, []).append(memory)
-        logger.info(
-            "Memory saved: user=%s predicate=%s value=%s",
-            memory.user_id, memory.predicate, memory.value,
-        )
-        return memory
-
-    def find_by_user(
-        self, user_id: str, mem_type: MemoryType | None = None
-    ) -> list[Memory]:
-        """返回某用户全部记忆,可按类型过滤。"""
-        items = list(self._store.get(user_id, []))
-        if mem_type is not None:
-            items = [m for m in items if m.type == mem_type]
-        return items
-
-    def find_active(
-        self, user_id: str, predicate: str | None = None
-    ) -> list[Memory]:
-        """返回某用户当前有效记忆,可按谓词过滤。"""
-        items = self.find_by_user(user_id)
-        active = [m for m in items if m.is_active()]
-        if predicate is not None:
-            active = [m for m in active if m.predicate == predicate]
-        return active
-
-    def find_similar(
-        self,
-        user_id: str,
-        query_embedding: list[float],
-        top_k: int = 5,
-        min_similarity: float = 0.3,
-    ) -> list[tuple[float, Memory]]:
-        """内存后端降级实现:基于 embedding 字段做精确余弦相似度。
-
-        若保存时未填充 embedding,则返回空列表。
-        """
-        active = self.find_active(user_id)
-        scored: list[tuple[float, Memory]] = []
-        for mem in active:
-            if mem.embedding is None:
-                continue
-            sim = _cosine_similarity(query_embedding, mem.embedding)
-            if sim >= min_similarity:
-                scored.append((sim, mem))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return scored[:top_k]
-
-    def deactivate(self, memory_id: str) -> None:
-        """将指定记忆置为失效(就地更新 valid_to)。"""
-        for items in self._store.values():
-            for idx, mem in enumerate(items):
-                if mem.id == memory_id:
-                    now = datetime.now(timezone.utc)
-                    items[idx] = mem.model_copy(update={"valid_to": now})
-                    logger.info("Memory %s deactivated", memory_id)
-                    return
-
-
 class PostgreSQLMemoryRepository:
-    """基于 PostgreSQL + pgvector 的 Memory 仓储实现。"""
+    """基于 PostgreSQL + pgvector 的 Memory 仓储实现(企业级生产后端)。"""
 
     backend: str = "postgres"
 
@@ -233,37 +162,19 @@ class PostgreSQLMemoryRepository:
                 logger.info("Memory %s deactivated(pg)", memory_id)
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    if len(a) != len(b) or not a:
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = sum(x * x for x in a) ** 0.5
-    nb = sum(x * x for x in b) ** 0.5
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
-
-
 _default_repo: MemoryRepository | None = None
 
 
-def build_repository(backend: str = "in_memory") -> MemoryRepository:
-    """按 backend 名称构造仓储实例。in_memory | postgres"""
-    if backend == "postgres":
-        return PostgreSQLMemoryRepository()
-    return InMemoryMemoryRepository()
+def build_repository() -> MemoryRepository:
+    """构造 MemoryRepository 企业级实例(PostgreSQL + pgvector)。"""
+    return PostgreSQLMemoryRepository()
 
 
 def get_memory_repository() -> MemoryRepository:
-    """获取默认 Memory 仓储单例。读取配置 memory.repository_backend。"""
+    """获取默认 Memory 仓储单例(PostgreSQL 后端)。"""
     global _default_repo
     if _default_repo is None:
-        try:
-            from app.config import get_app_config
-            backend = get_app_config().memory.repository_backend
-        except Exception:
-            backend = "in_memory"
-        _default_repo = build_repository(backend)
+        _default_repo = build_repository()
     return _default_repo
 
 

@@ -1,4 +1,4 @@
-# Memory 模块单元测试 - 使用独立 service 实例与 IntentStubLLM 桩,不依赖全局单例与外部服务
+# Memory 模块单元测试 - 使用独立 service 实例与 IntentStubLLM 桩,通过 Mock MemoryRepository 实现不依赖外部服务
 # 运行指南: pytest tests/unit/test_memory.py -v
 # IntentStubLLM 定义于 tests/conftest.py,用于驱动 Agent 图的执行流程,验证记忆注入逻辑
 
@@ -9,7 +9,7 @@ from app.config import PolicyConfig
 from app.memory.extractor import MemoryExtractor
 from tests.conftest import IntentStubLLM
 from app.memory.models import Memory, MemoryType
-from app.memory.repository import InMemoryMemoryRepository
+from app.memory.repository import MemoryRepository
 from app.memory.retriever import MemoryRetriever
 from app.memory.service import MemoryService
 from app.memory.temporal import get_latest_active, resolve_conflict
@@ -18,9 +18,86 @@ from app.simulation.scene_pool import get_scene_pool
 from app.tools.vehicle import VehicleService
 
 
-def _make_service() -> tuple[MemoryService, InMemoryMemoryRepository]:
-    """构造独立的 MemoryService 与仓储。"""
-    repo = InMemoryMemoryRepository()
+class FakeMemoryRepository:
+    """Mock MemoryRepository 实现:基于内存字典,仅用于单元测试,符合 MemoryRepository Protocol。"""
+
+    backend: str = "fake"
+
+    def __init__(self) -> None:
+        """初始化按 user_id 索引的存储。"""
+        self._store: dict[str, list[Memory]] = {}
+
+    def save(self, memory: Memory) -> Memory:
+        """保存记忆(追加)。"""
+        self._store.setdefault(memory.user_id, []).append(memory)
+        return memory
+
+    def find_by_user(
+        self, user_id: str, mem_type: MemoryType | None = None
+    ) -> list[Memory]:
+        """返回某用户全部记忆,可按类型过滤。"""
+        items = list(self._store.get(user_id, []))
+        if mem_type is not None:
+            items = [m for m in items if m.type == mem_type]
+        return items
+
+    def find_active(
+        self, user_id: str, predicate: str | None = None
+    ) -> list[Memory]:
+        """返回某用户当前有效记忆,可按谓词过滤。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        items = self.find_by_user(user_id)
+        active = [m for m in items if m.is_active()]
+        if predicate is not None:
+            active = [m for m in active if m.predicate == predicate]
+        return active
+
+    def find_similar(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        top_k: int = 5,
+        min_similarity: float = 0.3,
+    ) -> list[tuple[float, Memory]]:
+        """Fake 实现:基于 embedding 字段做精确余弦相似度。"""
+        active = self.find_active(user_id)
+        scored: list[tuple[float, Memory]] = []
+        for mem in active:
+            if mem.embedding is None:
+                continue
+            sim = _cosine_similarity(query_embedding, mem.embedding)
+            if sim >= min_similarity:
+                scored.append((sim, mem))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[:top_k]
+
+    def deactivate(self, memory_id: str) -> None:
+        """将指定记忆置为失效。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        for items in self._store.values():
+            for idx, mem in enumerate(items):
+                if mem.id == memory_id:
+                    items[idx] = mem.model_copy(update={"valid_to": now})
+                    return
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Fake 实现辅助:计算余弦相似度。"""
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _make_service() -> tuple[MemoryService, MemoryRepository]:
+    """构造独立的 MemoryService 与 Fake 仓储(符合 MemoryRepository Protocol)。"""
+    repo: MemoryRepository = FakeMemoryRepository()
     retriever = MemoryRetriever(repo)
     extractor = MemoryExtractor()
     return MemoryService(extractor, retriever, repo), repo

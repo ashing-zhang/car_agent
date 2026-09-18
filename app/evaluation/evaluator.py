@@ -21,7 +21,7 @@ from app.evaluation.dataset import EvalCase, load_scenarios
 from app.evaluation.metrics import CaseResult, MetricsReport, compute_metrics
 from app.llm.provider import get_llm_provider
 from app.memory.extractor import MemoryExtractor
-from app.memory.repository import InMemoryMemoryRepository
+from app.memory.repository import build_repository
 from app.memory.retriever import MemoryRetriever
 from app.memory.service import MemoryService
 from app.simulation.providers import SceneVehicleProvider
@@ -61,8 +61,8 @@ class Evaluator:
         return service, registry
 
     def _make_react_agent(self) -> object:
-        """构造隔离的 ReAct Agent(独立 memory + 真实 LLM + 全工具 registry)。"""
-        repo = InMemoryMemoryRepository()
+        """构造隔离的 ReAct Agent(独立 PostgreSQL memory + 真实 LLM + 全工具 registry)。"""
+        repo = build_repository()
         mem = MemoryService(
             MemoryExtractor(self._config.memory.min_confidence),
             MemoryRetriever(repo, self._config.memory.retrieval_top_k),

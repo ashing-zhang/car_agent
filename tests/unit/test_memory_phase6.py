@@ -1,7 +1,8 @@
 # Phase 6+ Memory 扩展测试 - 多偏好提取 + 向量语义检索
 # 运行指南: pytest tests/unit/test_memory_phase6.py -v
 # 说明: 测试使用 HashEmbeddingStub (tests/conftest.py 定义)作为向量化桩,
-#      保证在无 Embedding API Key 时仍可验证检索流程与数据流正确性。
+#      并通过 FakeMemoryRepository (符合 MemoryRepository Protocol) 实现,
+#      保证在无 Embedding API Key、无 PostgreSQL 时仍可验证检索流程与数据流正确性。
 
 from app.memory.embedding import (
     reset_embedding_provider,
@@ -9,7 +10,7 @@ from app.memory.embedding import (
 from app.memory.extractor import MemoryExtractor
 from app.memory.models import Memory, MemoryType, PREFERENCE_PREDICATES
 from app.memory.repository import (
-    InMemoryMemoryRepository,
+    MemoryRepository,
     build_repository,
     reset_memory_repository,
 )
@@ -18,14 +19,90 @@ from app.memory.service import MemoryService, reset_memory_service
 from tests.conftest import HashEmbeddingStub
 
 
-def _make_svc() -> tuple[MemoryService, InMemoryMemoryRepository, HashEmbeddingStub]:
-    """构造独立的 MemoryService 与 InMemory repo(使用 HashEmbeddingStub 桩)。"""
+class FakeMemoryRepository:
+    """Mock MemoryRepository 实现:基于内存字典,仅用于单元测试,符合 MemoryRepository Protocol。"""
+
+    backend: str = "fake"
+
+    def __init__(self) -> None:
+        """初始化按 user_id 索引的存储。"""
+        self._store: dict[str, list[Memory]] = {}
+
+    def save(self, memory: Memory) -> Memory:
+        """保存记忆(追加)。"""
+        self._store.setdefault(memory.user_id, []).append(memory)
+        return memory
+
+    def find_by_user(
+        self, user_id: str, mem_type: MemoryType | None = None
+    ) -> list[Memory]:
+        """返回某用户全部记忆,可按类型过滤。"""
+        items = list(self._store.get(user_id, []))
+        if mem_type is not None:
+            items = [m for m in items if m.type == mem_type]
+        return items
+
+    def find_active(
+        self, user_id: str, predicate: str | None = None
+    ) -> list[Memory]:
+        """返回某用户当前有效记忆,可按谓词过滤。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        items = self.find_by_user(user_id)
+        active = [m for m in items if m.is_active()]
+        if predicate is not None:
+            active = [m for m in active if m.predicate == predicate]
+        return active
+
+    def find_similar(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        top_k: int = 5,
+        min_similarity: float = 0.3,
+    ) -> list[tuple[float, Memory]]:
+        """Fake 实现:基于 embedding 字段做精确余弦相似度。"""
+        active = self.find_active(user_id)
+        scored: list[tuple[float, Memory]] = []
+        for mem in active:
+            if mem.embedding is None:
+                continue
+            sim = _cosine_similarity(query_embedding, mem.embedding)
+            if sim >= min_similarity:
+                scored.append((sim, mem))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[:top_k]
+
+    def deactivate(self, memory_id: str) -> None:
+        """将指定记忆置为失效。"""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        for items in self._store.values():
+            for idx, mem in enumerate(items):
+                if mem.id == memory_id:
+                    items[idx] = mem.model_copy(update={"valid_to": now})
+                    return
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Fake 实现辅助:计算余弦相似度。"""
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _make_svc() -> tuple[MemoryService, MemoryRepository, HashEmbeddingStub]:
+    """构造独立的 MemoryService 与 Fake repo(符合 Protocol,使用 HashEmbeddingStub 桩)。"""
     reset_memory_service()
     reset_memory_repository()
     reset_embedding_provider()
     embed = HashEmbeddingStub()
-    repo = build_repository("in_memory")
-    assert isinstance(repo, InMemoryMemoryRepository)
+    repo: MemoryRepository = FakeMemoryRepository()
     retriever = MemoryRetriever(repo, top_k=5, embedding_provider=embed)
     extractor = MemoryExtractor()
     svc = MemoryService(extractor, retriever, repo, embedding_provider=embed)
@@ -109,7 +186,7 @@ def test_memory_embedding_saved_on_remember() -> None:
 
 
 def test_semantic_vector_retrieval_in_memory() -> None:
-    """InMemory 后端基于 embedding 的余弦相似度检索。"""
+    """Fake 后端基于 embedding 的余弦相似度检索。"""
     svc, _, embed = _make_svc()
     svc.remember("我喜欢车内保持24度", "u1", "s1")
     svc.remember("我习惯座椅加热开2档", "u1", "s1")
@@ -127,7 +204,7 @@ def test_semantic_vector_retrieval_in_memory() -> None:
 def test_keyword_fallback_works() -> None:
     """无 embedding 时仍可通过关键词检索。"""
     embed = HashEmbeddingStub()
-    repo = InMemoryMemoryRepository()
+    repo: MemoryRepository = FakeMemoryRepository()
     mem = Memory(
         user_id="u1", session_id="s1",
         type=MemoryType.PREFERENCE,
