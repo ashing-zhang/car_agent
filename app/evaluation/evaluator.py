@@ -9,8 +9,9 @@
 
 import logging
 import time
+import traceback
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.agent.graph import build_agent
 from app.agent.llm_planner import LLMPlanner
@@ -18,7 +19,15 @@ from app.agent.plan_graph import PlanExecuteState, build_plan_agent
 from app.agent.tool_registry import ToolRegistry
 from app.config import AppYamlConfig, EvalYamlConfig, get_app_config, get_eval_config
 from app.evaluation.dataset import EvalCase, load_scenarios
-from app.evaluation.metrics import CaseResult, MetricsReport, compute_metrics
+from app.evaluation.metrics import (
+    CaseResult,
+    CaseTrace,
+    MessageRecord,
+    MetricsReport,
+    NodeExecutionRecord,
+    ToolExecutionRecord,
+    compute_metrics,
+)
 from app.llm.provider import get_llm_provider
 from app.memory.extractor import MemoryExtractor
 from app.memory.repository import build_repository
@@ -34,6 +43,22 @@ from app.tools.vehicle import VehicleService
 logger = logging.getLogger(__name__)
 
 SAFETY_CRITICAL_TOOLS: set[str] = {"steering", "brake", "throttle"}
+
+
+def _message_to_record(msg: BaseMessage) -> MessageRecord:
+    """将 LangChain 消息转换为可序列化的 MessageRecord。"""
+    role = getattr(msg, "type", "unknown")
+    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+    tool_calls: list[dict] = []
+    if isinstance(msg, AIMessage) and msg.tool_calls:
+        tool_calls = [
+            {"name": tc.get("name", ""), "args": tc.get("args", {}), "id": tc.get("id", "")}
+            for tc in msg.tool_calls
+        ]
+    extra: dict = {}
+    if isinstance(msg, ToolMessage):
+        extra["tool_call_id"] = getattr(msg, "tool_call_id", "")
+    return MessageRecord(role=role, content=content, tool_calls=tool_calls, extra=extra)
 
 
 class Evaluator:
@@ -78,45 +103,230 @@ class Evaluator:
         planner = LLMPlanner(llm, registry)
         return build_plan_agent(planner=planner, registry=registry), registry
 
+    def _evaluate_plan_case(self, case: EvalCase, trace: CaseTrace) -> tuple[list[str], list[dict]]:
+        """执行 Plan-Execute 模式的 case,通过 stream 逐节点捕获完整数据流。"""
+        plan_agent, registry = self._make_plan_agent()
+        session_id = f"eval-plan-{case.id}"
+        user_id = "eval-user"
+        trace.agent_type = "plan_execute"
+        trace.session_id = session_id
+        trace.user_id = user_id
+
+        input_state: PlanExecuteState = {
+            "messages": [HumanMessage(content=case.user)],
+            "user_id": user_id,
+            "session_id": session_id,
+        }
+
+        actual_tools: list[str] = []
+        actual_args: list[dict] = []
+        prev_state: dict = dict(input_state)
+
+        for step_output in plan_agent.stream(input_state):
+            for node_name, node_output in step_output.items():
+                node_start = time.perf_counter()
+                node_record = NodeExecutionRecord(
+                    node_name=node_name,
+                    input_data=self._sanitize_state(prev_state),
+                )
+                try:
+                    node_record.output_data = self._sanitize_state(node_output)
+
+                    if node_name == "planner":
+                        plan_steps = node_output.get("plan", [])
+                        trace.plan_steps = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in plan_steps]
+                        logger.info("Case %s plan: %s", case.id, trace.plan_steps)
+
+                    if node_name == "execute":
+                        calls = node_output.get("tool_calls", [])
+                        results = node_output.get("tool_results", [])
+                        for tc in calls:
+                            name = tc.name if hasattr(tc, "name") else tc.get("name", "")
+                            args = tc.arguments if hasattr(tc, "arguments") else tc.get("arguments", {})
+                            actual_tools.append(name)
+                            actual_args.append(dict(args))
+                        for tr in results:
+                            tool_rec = ToolExecutionRecord(
+                                tool_name=tr.tool_name if hasattr(tr, "tool_name") else tr.get("tool_name", ""),
+                                arguments=dict(args) if args else {},
+                                result=tr.output if hasattr(tr, "output") else tr.get("output", ""),
+                                success=tr.success if hasattr(tr, "success") else tr.get("success", True),
+                                error=tr.error if hasattr(tr, "error") else tr.get("error"),
+                            )
+                            trace.tool_executions.append(tool_rec)
+
+                    if node_name == "respond":
+                        trace.final_response = node_output.get("response", "")
+
+                except Exception as exc:  # noqa: BLE001
+                    node_record.status = "error"
+                    node_record.error = str(exc)
+                    logger.warning("Case %s node %s record error: %s", case.id, node_name, exc)
+                finally:
+                    node_record.latency_ms = (time.perf_counter() - node_start) * 1000
+                    trace.node_executions.append(node_record)
+
+                merged = dict(prev_state)
+                for k, v in (node_output or {}).items():
+                    if isinstance(v, list) and isinstance(merged.get(k), list):
+                        merged[k] = list(merged[k]) + list(v)
+                    else:
+                        merged[k] = v
+                prev_state = merged
+
+        for msg in prev_state.get("messages", []):
+            trace.messages.append(_message_to_record(msg))
+
+        return actual_tools, actual_args
+
+    def _evaluate_react_case(self, case: EvalCase, trace: CaseTrace) -> tuple[list[str], list[dict]]:
+        """执行 ReAct 模式的 case,通过 stream 逐节点捕获完整数据流。"""
+        agent = self._make_react_agent()
+        session_id = f"eval-react-{case.id}"
+        user_id = "eval-user"
+        trace.agent_type = "react"
+        trace.session_id = session_id
+        trace.user_id = user_id
+
+        input_state = {
+            "messages": [HumanMessage(content=case.user)],
+            "user_id": user_id,
+            "session_id": session_id,
+        }
+
+        actual_tools: list[str] = []
+        actual_args: list[dict] = []
+        prev_state: dict = dict(input_state)
+        memory_ctx_parts: list[str] = []
+
+        for step_output in agent.stream(input_state):
+            for node_name, node_output in step_output.items():
+                node_start = time.perf_counter()
+                node_record = NodeExecutionRecord(
+                    node_name=node_name,
+                    input_data=self._sanitize_state(prev_state),
+                )
+                try:
+                    node_record.output_data = self._sanitize_state(node_output)
+
+                    if node_name == "retrieve_memory":
+                        sys_msgs = node_output.get("messages", [])
+                        for sm in sys_msgs:
+                            content = sm.content if isinstance(sm.content, str) else str(sm.content)
+                            memory_ctx_parts.append(content)
+                        trace.memory_context = "\n---\n".join(memory_ctx_parts)
+
+                    if node_name == "agent":
+                        out_msgs = node_output.get("messages", [])
+                        for m in out_msgs:
+                            if isinstance(m, AIMessage) and m.tool_calls:
+                                for tc in m.tool_calls:
+                                    actual_tools.append(tc.get("name", ""))
+                                    args_dict = tc.get("args", {})
+                                    actual_args.append(dict(args_dict) if isinstance(args_dict, dict) else {})
+
+                    if node_name == "tools":
+                        out_msgs = node_output.get("messages", [])
+                        for m in out_msgs:
+                            trec = ToolExecutionRecord(
+                                tool_name="",
+                                result=m.content if isinstance(m.content, str) else str(m.content),
+                                success=True,
+                            )
+                            if isinstance(m, ToolMessage):
+                                trec.tool_name = getattr(m, "name", "") or f"tool_{m.tool_call_id}"
+                            trace.tool_executions.append(trec)
+
+                except Exception as exc:  # noqa: BLE001
+                    node_record.status = "error"
+                    node_record.error = str(exc)
+                    logger.warning("Case %s node %s record error: %s", case.id, node_name, exc)
+                finally:
+                    node_record.latency_ms = (time.perf_counter() - node_start) * 1000
+                    trace.node_executions.append(node_record)
+
+                merged = dict(prev_state)
+                for k, v in (node_output or {}).items():
+                    if isinstance(v, list) and isinstance(merged.get(k), list):
+                        merged[k] = list(merged[k]) + list(v)
+                    else:
+                        merged[k] = v
+                prev_state = merged
+
+        final_messages = prev_state.get("messages", [])
+        for msg in final_messages:
+            trace.messages.append(_message_to_record(msg))
+        if final_messages:
+            last_msg = final_messages[-1]
+            if isinstance(last_msg.content, str):
+                trace.final_response = last_msg.content
+            else:
+                trace.final_response = str(last_msg.content)
+
+        return actual_tools, actual_args
+
+    @staticmethod
+    def _sanitize_state(state: dict) -> dict:
+        """将状态中的消息/对象转为可 JSON 序列化的基本类型。"""
+        out: dict = {}
+        for k, v in (state or {}).items():
+            if isinstance(v, list):
+                items: list = []
+                for item in v:
+                    if hasattr(item, "model_dump"):
+                        try:
+                            items.append(item.model_dump(mode="json"))
+                            continue
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if isinstance(item, BaseMessage):
+                        items.append(_message_to_record(item).model_dump(mode="json"))
+                    elif isinstance(item, (str, int, float, bool, type(None))):
+                        items.append(item)
+                    elif isinstance(item, dict):
+                        items.append(item)
+                    else:
+                        try:
+                            items.append(dict(item))
+                        except Exception:  # noqa: BLE001
+                            items.append(str(item))
+                out[k] = items
+            elif hasattr(v, "model_dump"):
+                try:
+                    out[k] = v.model_dump(mode="json")
+                except Exception:  # noqa: BLE001
+                    out[k] = str(v)
+            elif isinstance(v, (str, int, float, bool, type(None))):
+                out[k] = v
+            elif isinstance(v, dict):
+                out[k] = v
+            else:
+                out[k] = str(v)
+        return out
+
     def evaluate_case(self, case: EvalCase) -> CaseResult:
         """执行单个场景并返回结果;多工具走 Plan-Execute,单工具走 ReAct。"""
         start = time.perf_counter()
+        trace = CaseTrace()
         actual_tools: list[str] = []
         actual_args: list[dict] = []
 
         use_plan = len(case.expected_tools) > 1
         try:
             if use_plan:
-                plan_agent, _ = self._make_plan_agent()
-                state: PlanExecuteState = plan_agent.invoke(
-                    {
-                        "messages": [HumanMessage(content=case.user)],
-                        "user_id": "eval-user",
-                        "session_id": f"eval-plan-{case.id}",
-                    }
-                )
-                for tc in state.get("tool_calls", []):
-                    actual_tools.append(tc.name)
-                    actual_args.append(tc.arguments)
+                actual_tools, actual_args = self._evaluate_plan_case(case, trace)
             else:
-                agent = self._make_react_agent()
-                result: dict[str, list[BaseMessage]] = agent.invoke(
-                    {
-                        "messages": [HumanMessage(content=case.user)],
-                        "user_id": "eval-user",
-                        "session_id": f"eval-react-{case.id}",
-                    }
-                )
-                for msg in result.get("messages", []):
-                    if isinstance(msg, AIMessage) and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            actual_tools.append(tc["name"])
-                            actual_args.append(tc["args"])
-        except Exception:
+                actual_tools, actual_args = self._evaluate_react_case(case, trace)
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Case %s execution raised", case.id)
+            trace.error_message = str(exc)
+            trace.error_traceback = traceback.format_exc()
             raise
+        finally:
+            latency = (time.perf_counter() - start) * 1000
+            if trace.error_traceback:
+                trace.error_traceback += f"\n[Case total latency: {latency:.2f} ms]"
 
-        latency = (time.perf_counter() - start) * 1000
         expected_set = set(case.expected_tools)
         actual_set = set(actual_tools)
 
@@ -127,12 +337,21 @@ class Evaluator:
         else:
             success = True
 
+        hallucinated = [t for t in actual_tools if t not in {
+            "get_vehicle_status", "get_cabin_temperature", "set_temperature", "set_ac",
+            "get_navigation_status", "search_destination", "start_navigation", "cancel_navigation",
+            "play_media", "pause_media", "set_volume",
+            "get_weather", "get_traffic", "get_camera_scene",
+        }]
+
         return CaseResult(
             case=case,
             actual_tools=actual_tools,
             actual_arguments=actual_args,
             success=success,
             latency_ms=latency,
+            hallucinated_tools=hallucinated,
+            trace=trace,
         )
 
     def run(self, cases: list[EvalCase] | None = None) -> list[CaseResult]:
@@ -142,9 +361,13 @@ class Evaluator:
         for case in cases:
             try:
                 results.append(self.evaluate_case(case))
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("Case %s failed", case.id)
-                results.append(CaseResult(case=case, success=False, latency_ms=0.0))
+                trace = CaseTrace(
+                    error_message=str(exc),
+                    error_traceback=traceback.format_exc(),
+                )
+                results.append(CaseResult(case=case, success=False, latency_ms=0.0, trace=trace))
         return results
 
 

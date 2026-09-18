@@ -11,6 +11,53 @@ from pydantic import BaseModel, Field
 from app.evaluation.dataset import EvalCase
 
 
+class NodeExecutionRecord(BaseModel):
+    """Agent 图中单个节点的执行记录(输入、输出、耗时)。"""
+
+    node_name: str
+    input_data: dict[str, Any] = Field(default_factory=dict)
+    output_data: dict[str, Any] = Field(default_factory=dict)
+    latency_ms: float = 0.0
+    status: str = "ok"
+    error: str | None = None
+
+
+class ToolExecutionRecord(BaseModel):
+    """单次工具调用的完整记录。"""
+
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: Any = None
+    success: bool = True
+    error: str | None = None
+    latency_ms: float = 0.0
+
+
+class MessageRecord(BaseModel):
+    """单条消息流转记录。"""
+
+    role: str
+    content: str
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaseTrace(BaseModel):
+    """单个评估 case 的完整 Trace 记录(数据流 + 节点执行 + 错误堆栈)。"""
+
+    agent_type: str = ""
+    session_id: str = ""
+    user_id: str = ""
+    messages: list[MessageRecord] = Field(default_factory=list)
+    node_executions: list[NodeExecutionRecord] = Field(default_factory=list)
+    tool_executions: list[ToolExecutionRecord] = Field(default_factory=list)
+    plan_steps: list[dict[str, Any]] = Field(default_factory=list)
+    final_response: str = ""
+    memory_context: str = ""
+    error_message: str | None = None
+    error_traceback: str | None = None
+
+
 class CaseResult(BaseModel):
     """单个场景的评估结果。"""
 
@@ -20,6 +67,7 @@ class CaseResult(BaseModel):
     success: bool = False
     latency_ms: float = 0.0
     hallucinated_tools: list[str] = Field(default_factory=list)
+    trace: CaseTrace = Field(default_factory=CaseTrace)
 
 
 class MetricsReport(BaseModel):
