@@ -5,7 +5,8 @@
 #   report = run_evaluation()
 # 运行环境:
 #   - 必须配置真实 LLM API Key(.env 中 DASHSCOPE_API_KEY / LLM_API_KEY)
-#   - 多工具场景走 LLMPlanner(含规则 Planner fallback),单工具场景走 ReAct Agent
+#   - 通过 IntentClassifier 自动判断单步/多步意图,再路由到对应 Agent
+#   - 同时记录意图分类准确率与混淆矩阵
 
 import logging
 import time
@@ -14,10 +15,13 @@ import traceback
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.agent.graph import build_agent
+from app.agent.intent.classifier import IntentClassifier
+from app.agent.intent.factory import build_intent_classifier
+from app.agent.intent.models import AgentType, IntentClassification
 from app.agent.llm_planner import LLMPlanner
 from app.agent.plan_graph import PlanExecuteState, build_plan_agent
 from app.agent.tool_registry import ToolRegistry
-from app.config import AppYamlConfig, EvalYamlConfig, get_app_config, get_eval_config
+from app.config import AppYamlConfig, EvalYamlConfig, IntentClassifierConfig, get_app_config, get_eval_config
 from app.evaluation.dataset import EvalCase, load_scenarios
 from app.evaluation.metrics import (
     CaseResult,
@@ -68,12 +72,30 @@ class Evaluator:
         self,
         app_config: AppYamlConfig | None = None,
         eval_config: EvalYamlConfig | None = None,
+        classifier: IntentClassifier | None = None,
+        classifier_config: IntentClassifierConfig | None = None,
     ) -> None:
-        """加载应用与评估配置,并在初始化阶段预检 LLM。"""
+        """加载应用与评估配置,初始化意图分类器,预检 LLM。"""
         self._config: AppYamlConfig = app_config or get_app_config()
         self._eval_cfg: EvalYamlConfig = eval_config or get_eval_config()
         self._llm_prototype = get_llm_provider()
-        logger.info("Evaluator initialized with real LLM (%s)", type(self._llm_prototype).__name__)
+        self._cls_cfg: IntentClassifierConfig = classifier_config or self._config.intent_classifier
+        self._classifier: IntentClassifier = classifier or build_intent_classifier(
+            self._cls_cfg, llm=self._llm_prototype,
+        )
+        logger.info(
+            "Evaluator initialized with real LLM (%s) + classifier (%s)",
+            type(self._llm_prototype).__name__, type(self._classifier).__name__,
+        )
+
+    @staticmethod
+    def ground_truth_agent_type(case: EvalCase) -> AgentType:
+        """根据评估标注(期望工具数+类别)推导真实 AgentType。"""
+        if case.category in ("multi_step", "navigation"):
+            return AgentType.PLAN_EXECUTE
+        if len(case.expected_tools) > 1:
+            return AgentType.PLAN_EXECUTE
+        return AgentType.REACT
 
     def _make_shared_services(
         self,
@@ -133,13 +155,13 @@ class Evaluator:
                     node_record.output_data = self._sanitize_state(node_output)
 
                     if node_name == "planner":
-                        plan_steps = node_output.get("plan", [])
+                        plan_steps = (node_output or {}).get("plan", [])
                         trace.plan_steps = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in plan_steps]
                         logger.info("Case %s plan: %s", case.id, trace.plan_steps)
 
                     if node_name == "execute":
-                        calls = node_output.get("tool_calls", [])
-                        results = node_output.get("tool_results", [])
+                        calls = (node_output or {}).get("tool_calls", [])
+                        results = (node_output or {}).get("tool_results", [])
                         for tc in calls:
                             name = tc.name if hasattr(tc, "name") else tc.get("name", "")
                             args = tc.arguments if hasattr(tc, "arguments") else tc.get("arguments", {})
@@ -156,7 +178,7 @@ class Evaluator:
                             trace.tool_executions.append(tool_rec)
 
                     if node_name == "respond":
-                        trace.final_response = node_output.get("response", "")
+                        trace.final_response = (node_output or {}).get("response", "")
 
                 except Exception as exc:  # noqa: BLE001
                     node_record.status = "error"
@@ -210,14 +232,14 @@ class Evaluator:
                     node_record.output_data = self._sanitize_state(node_output)
 
                     if node_name == "retrieve_memory":
-                        sys_msgs = node_output.get("messages", [])
+                        sys_msgs = (node_output or {}).get("messages", [])
                         for sm in sys_msgs:
                             content = sm.content if isinstance(sm.content, str) else str(sm.content)
                             memory_ctx_parts.append(content)
                         trace.memory_context = "\n---\n".join(memory_ctx_parts)
 
                     if node_name == "agent":
-                        out_msgs = node_output.get("messages", [])
+                        out_msgs = (node_output or {}).get("messages", [])
                         for m in out_msgs:
                             if isinstance(m, AIMessage) and m.tool_calls:
                                 for tc in m.tool_calls:
@@ -226,7 +248,7 @@ class Evaluator:
                                     actual_args.append(dict(args_dict) if isinstance(args_dict, dict) else {})
 
                     if node_name == "tools":
-                        out_msgs = node_output.get("messages", [])
+                        out_msgs = (node_output or {}).get("messages", [])
                         for m in out_msgs:
                             trec = ToolExecutionRecord(
                                 tool_name="",
@@ -305,13 +327,36 @@ class Evaluator:
         return out
 
     def evaluate_case(self, case: EvalCase) -> CaseResult:
-        """执行单个场景并返回结果;多工具走 Plan-Execute,单工具走 ReAct。"""
+        """执行单个场景:先分类意图,再路由到对应 Agent,并记录意图准确率。"""
         start = time.perf_counter()
         trace = CaseTrace()
         actual_tools: list[str] = []
         actual_args: list[dict] = []
 
-        use_plan = len(case.expected_tools) > 1
+        ground_truth = Evaluator.ground_truth_agent_type(case)
+        classification: IntentClassification = self._classifier.classify(case.user, user_id="eval-user")
+        use_plan = classification.agent_type == AgentType.PLAN_EXECUTE
+        if classification.agent_type == AgentType.PLAN_EXECUTE and classification.confidence < self._cls_cfg.min_confidence_for_plan:
+            use_plan = False
+            classification = IntentClassification(
+                agent_type=AgentType.REACT,
+                confidence=classification.confidence,
+                reason=f"{classification.reason}(confidence downgrade)",
+                signals=classification.signals,
+            )
+
+        trace.intent_classified_type = str(classification.agent_type)
+        trace.intent_classified_confidence = classification.confidence
+        trace.intent_reason = classification.reason
+        trace.intent_ground_truth = str(ground_truth)
+        intent_correct = str(classification.agent_type) == str(ground_truth)
+        trace.intent_correct = intent_correct
+        logger.info(
+            "Case %s intent: classified=%s(%.2f) gt=%s correct=%s signals=%s",
+            case.id, classification.agent_type, classification.confidence,
+            ground_truth, intent_correct, classification.signals,
+        )
+
         try:
             if use_plan:
                 actual_tools, actual_args = self._evaluate_plan_case(case, trace)
@@ -352,6 +397,7 @@ class Evaluator:
             latency_ms=latency,
             hallucinated_tools=hallucinated,
             trace=trace,
+            intent_correct=intent_correct,
         )
 
     def run(self, cases: list[EvalCase] | None = None) -> list[CaseResult]:

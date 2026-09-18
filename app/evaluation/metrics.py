@@ -56,6 +56,11 @@ class CaseTrace(BaseModel):
     memory_context: str = ""
     error_message: str | None = None
     error_traceback: str | None = None
+    intent_classified_type: str = ""
+    intent_classified_confidence: float = 0.0
+    intent_reason: str = ""
+    intent_ground_truth: str = ""
+    intent_correct: bool = False
 
 
 class CaseResult(BaseModel):
@@ -68,12 +73,14 @@ class CaseResult(BaseModel):
     latency_ms: float = 0.0
     hallucinated_tools: list[str] = Field(default_factory=list)
     trace: CaseTrace = Field(default_factory=CaseTrace)
+    intent_correct: bool = False
 
 
 class MetricsReport(BaseModel):
     """汇总指标报告(规格第19节)。"""
 
     total_cases: int = 0
+    intent_classification_accuracy: float = 0.0
     intent_accuracy: float = 0.0
     tool_selection_accuracy: float = 0.0
     argument_accuracy: float = 0.0
@@ -83,6 +90,7 @@ class MetricsReport(BaseModel):
     latency_p95_ms: float = 0.0
     latency_p99_ms: float = 0.0
     by_category: dict[str, dict] = Field(default_factory=dict)
+    intent_confusion: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 SAFE_KNOWN_TOOLS = {
@@ -106,16 +114,19 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
 
 
 def compute_metrics(results: list[CaseResult]) -> MetricsReport:
-    """汇总全部场景结果为指标报告。"""
+    """汇总全部场景结果为指标报告(含意图分类准确率与混淆矩阵)。"""
     if not results:
         return MetricsReport()
     total = len(results)
 
     task_successes = sum(1 for r in results if r.success)
+    intent_correct_count = sum(1 for r in results if r.intent_correct)
     tool_selection_scores: list[float] = []
     hallucinated_total = 0
     actual_calls_total = 0
     latencies = sorted(r.latency_ms for r in results)
+
+    confusion: dict[str, dict[str, int]] = {"react": {"react": 0, "plan_execute": 0}, "plan_execute": {"react": 0, "plan_execute": 0}}
 
     by_category: dict[str, list[CaseResult]] = {}
     for r in results:
@@ -128,24 +139,36 @@ def compute_metrics(results: list[CaseResult]) -> MetricsReport:
         hallucinated_total += len(hallucinated)
         actual_calls_total += len(r.actual_tools)
 
+        gt = r.trace.intent_ground_truth or ("plan_execute" if len(r.case.expected_tools) > 1 else "react")
+        pred = r.trace.intent_classified_type or ("plan_execute" if len(r.case.expected_tools) > 1 else "react")
+        confusion.setdefault(gt, {"react": 0, "plan_execute": 0}).setdefault(pred, 0)
+        confusion[gt][pred] = confusion[gt].get(pred, 0) + 1
+
     cat_summary: dict[str, dict] = {}
     for cat, cat_results in by_category.items():
         cat_success = sum(1 for r in cat_results if r.success)
+        cat_intent = sum(1 for r in cat_results if r.intent_correct)
         cat_summary[cat] = {
             "total": len(cat_results),
             "success": cat_success,
             "success_rate": cat_success / len(cat_results) if cat_results else 0,
+            "intent_correct": cat_intent,
+            "intent_accuracy": cat_intent / len(cat_results) if cat_results else 0,
         }
 
+    task_rate = task_successes / total
+    intent_acc = intent_correct_count / total
     return MetricsReport(
         total_cases=total,
-        intent_accuracy=task_successes / total,
+        intent_classification_accuracy=intent_acc,
+        intent_accuracy=task_rate,
         tool_selection_accuracy=mean(tool_selection_scores) if tool_selection_scores else 0.0,
         argument_accuracy=mean(tool_selection_scores) if tool_selection_scores else 0.0,
-        task_success_rate=task_successes / total,
+        task_success_rate=task_rate,
         hallucination_rate=hallucinated_total / actual_calls_total if actual_calls_total else 0.0,
         latency_p50_ms=_percentile(latencies, 50),
         latency_p95_ms=_percentile(latencies, 95),
         latency_p99_ms=_percentile(latencies, 99),
         by_category=cat_summary,
+        intent_confusion=confusion,
     )

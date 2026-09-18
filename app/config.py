@@ -77,6 +77,14 @@ class AgentConfig(BaseModel):
     reflection_enabled: bool = True
 
 
+class IntentClassifierConfig(BaseModel):
+    """意图分类器参数(配置驱动,支持 backend 切换)。"""
+
+    backend: str = "rule"
+    min_confidence_for_plan: float = 0.5
+    enable_fallback: bool = True
+
+
 class MemoryConfig(BaseModel):
     """记忆系统参数。"""
 
@@ -184,6 +192,7 @@ class AppYamlConfig(BaseModel):
 
     llm: LLMConfig = LLMConfig()
     agent: AgentConfig = AgentConfig()
+    intent_classifier: IntentClassifierConfig = IntentClassifierConfig()
     memory: MemoryConfig = MemoryConfig()
     policy: PolicyConfig = PolicyConfig()
     observability: ObservabilityConfig = ObservabilityConfig()

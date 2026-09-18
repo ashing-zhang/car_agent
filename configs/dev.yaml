@@ -17,6 +17,11 @@ agent:
   max_tool_calls: 8
   reflection_enabled: true
 
+intent_classifier:
+  backend: "rule"
+  min_confidence_for_plan: 0.5
+  enable_fallback: true
+
 memory:
   retrieval_top_k: 5
   min_confidence: 0.5
