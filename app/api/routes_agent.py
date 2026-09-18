@@ -163,9 +163,3 @@ async def _execute_chat(
 async def chat(req: ChatRequest) -> ChatResponse:
     """处理用户消息并返回 Agent 回复(自动识别单步/多步意图)。"""
     return await _execute_chat(req)
-
-
-@router.post("/plan", response_model=ChatResponse)
-async def plan(req: ChatRequest) -> ChatResponse:
-    """多步任务入口(向后兼容,内部已与 /chat 统一)。"""
-    return await _execute_chat(req)
