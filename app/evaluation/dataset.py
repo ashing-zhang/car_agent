@@ -1,10 +1,20 @@
 # Evaluation Dataset - 生成 100+ Automotive Agent 评估场景(规格第18节)
 # 运行指南:
-#   from app.evaluation.dataset import generate_scenarios, load_scenarios
+#   from app.evaluation.dataset import generate_scenarios, load_scenarios, save_scenarios
 #   scenarios = generate_scenarios()  # 程序化生成,覆盖 9 类
+#   save_scenarios(scenarios)         # 固化到文件 (默认 app/evaluation/scenarios)
+#   scenarios = load_scenarios()      # 从文件加载,不存在则自动生成并保存
 #   覆盖: vehicle_query/vehicle_control/navigation/media/memory/multi_step/multimodal/ambiguous/unsafe_request
+#   文件结构: {scenarios_dir}/{category}/{case_id}.json
+
+import logging
+from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+from app.config import PROJECT_ROOT, get_eval_config
+
+logger = logging.getLogger(__name__)
 
 
 class EvalCase(BaseModel):
@@ -15,7 +25,7 @@ class EvalCase(BaseModel):
     expected_tools: list[str] = Field(default_factory=list)
     expected_success: bool = True
     category: str
-    expected_reject: bool = False  # unsafe_request 期望拒绝
+    expected_reject: bool = False
 
 
 def _vq(n: int, user: str) -> EvalCase:
@@ -138,6 +148,84 @@ def generate_scenarios() -> list[EvalCase]:
     return cases
 
 
-def load_scenarios() -> list[EvalCase]:
-    """加载评估场景(当前程序生成,后续可替换为 yaml/json 文件)。"""
-    return generate_scenarios()
+def _resolve_scenarios_dir(scenarios_dir: str | Path | None = None) -> Path:
+    """解析场景存储目录,支持相对路径(相对项目根)和绝对路径。"""
+    cfg_dir = scenarios_dir or get_eval_config().dataset.scenarios_dir
+    path = Path(cfg_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def save_scenarios(cases: list[EvalCase], scenarios_dir: str | Path | None = None) -> Path:
+    """将评估场景持久化到文件系统,按 category 分目录,每 case 一个 JSON 文件。
+
+    返回写入的场景根目录路径。
+    """
+    root = _resolve_scenarios_dir(scenarios_dir)
+    root.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    for case in cases:
+        cat_dir = root / case.category
+        cat_dir.mkdir(parents=True, exist_ok=True)
+        file_path = cat_dir / f"{case.id}.json"
+        try:
+            file_path.write_text(case.model_dump_json(indent=2), encoding="utf-8")
+            written += 1
+        except (OSError, ValueError) as e:
+            logger.error("Failed to save scenario %s to %s: %s", case.id, file_path, e)
+
+    logger.info("Saved %d/%d evaluation scenarios to %s", written, len(cases), root)
+    return root
+
+
+def _scenario_dir_has_data(root: Path) -> bool:
+    """判断场景目录中是否存在已持久化的 JSON 文件。"""
+    if not root.exists():
+        return False
+    return any(root.rglob("*.json"))
+
+
+def load_scenarios(
+    scenarios_dir: str | Path | None = None,
+    auto_generate: bool = True,
+    auto_persist: bool = True,
+) -> list[EvalCase]:
+    """从文件系统加载评估场景。
+
+    策略:
+      1. 若目录存在且包含 JSON 文件,从文件加载;
+      2. 否则(若 auto_generate=True)调用 generate_scenarios() 程序化生成;
+      3. 生成后若 auto_persist=True,自动固化到文件,便于下次直接加载。
+    """
+    root = _resolve_scenarios_dir(scenarios_dir)
+
+    if _scenario_dir_has_data(root):
+        cases: list[EvalCase] = []
+        json_files = sorted(root.rglob("*.json"))
+        for fp in json_files:
+            try:
+                raw = fp.read_text(encoding="utf-8")
+                case = EvalCase.model_validate_json(raw)
+                cases.append(case)
+            except (OSError, ValueError) as e:
+                logger.warning("Skip invalid scenario file %s: %s", fp, e)
+        if cases:
+            logger.info("Loaded %d evaluation scenarios from %s", len(cases), root)
+            return cases
+        logger.warning("Scenario dir %s contains files but none valid, regenerating", root)
+
+    if not auto_generate:
+        raise FileNotFoundError(f"No scenarios found in {root} and auto_generate disabled")
+
+    cases = generate_scenarios()
+    logger.info("Generated %d evaluation scenarios programmatically", len(cases))
+
+    if auto_persist:
+        try:
+            save_scenarios(cases, root)
+        except Exception as e:
+            logger.warning("Failed to persist generated scenarios to %s: %s", root, e)
+
+    return cases
