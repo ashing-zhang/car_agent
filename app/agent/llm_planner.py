@@ -29,6 +29,12 @@ _SYSTEM_PROMPT: str = """你是一名车辆智能助手的任务规划器(Planne
 3. 若没有需要调用的工具(纯闲聊/致谢等),输出空数组 []。
 4. 只输出 JSON,不要输出任何 markdown 标记、解释或额外文字。
 5. 注意安全:车速>120km/h 时禁止开窗,车速>5km/h 时禁止开后备箱,如用户请求不安全操作则跳过该步骤。
+6. 【强制导航两步走】涉及导航/目的地(如"去XX"、"回XX"、"前往XX"、"导航到XX")时,必须依次生成两步且顺序不可颠倒:
+   第一步: search_destination(query="目的地关键词")
+   第二步: start_navigation(destination="目的地候选名,可拼接后缀如 大厦")
+   即使搜索结果显而易见也不可省略 start_navigation。
+7. 【POI 启发式】"家"、"公司"、"学校"、"商场"、"医院"、"机场"、"火车站"等都是典型导航目的地,不要误判为媒体歌单名或其他参数。"回家"中的"家"是目的地。
+8. 涉及多种意图并列(如"去X顺便播放Y"、"去X同时听Y")时,先完成完整的导航两步(search+start),再追加媒体等其他步骤。
 """
 
 
@@ -66,6 +72,21 @@ class LLMPlanner:
             lines.append(f"- {name} - {desc} - 参数({param_str})")
         return "\n".join(lines)
 
+    @staticmethod
+    def _validate_navigation_integrity(steps: list[PlanStep]) -> bool:
+        """校验导航两步走完整性:有 search_destination 就必须有紧跟其后的 start_navigation。"""
+        tools = [s.tool for s in steps]
+        if "search_destination" not in tools:
+            return True
+        idx = tools.index("search_destination")
+        if idx + 1 >= len(tools) or tools[idx + 1] != "start_navigation":
+            logger.warning(
+                "LLMPlanner plan invalid: has search_destination without consecutive start_navigation (tools=%s)",
+                tools,
+            )
+            return False
+        return True
+
     def plan(self, user_message: str, user_id: str = "demo-user") -> list[PlanStep]:
         """委托 LLM 根据用户消息生成有序 PlanStep 列表;最多重试 2 次,失败则降级到规则 Planner。"""
         system_prompt = _SYSTEM_PROMPT.format(tool_descriptions=self._tool_desc)
@@ -81,13 +102,25 @@ class LLMPlanner:
                 content = response.content if isinstance(response.content, str) else str(response.content)
                 steps = self._parse_steps(content)
                 if steps:
-                    logger.info(
-                        "LLMPlanner generated %d steps for user=%s attempt=%d",
-                        len(steps),
-                        user_id,
+                    if LLMPlanner._validate_navigation_integrity(steps):
+                        logger.info(
+                            "LLMPlanner generated %d steps for user=%s attempt=%d",
+                            len(steps),
+                            user_id,
+                            attempt,
+                        )
+                        return steps
+                    logger.warning(
+                        "LLMPlanner navigation integrity check failed on attempt %d, retrying",
                         attempt,
                     )
-                    return steps
+                    messages.append(AIMessage(content=content))
+                    messages.append(
+                        HumanMessage(
+                            content="之前的计划违反了导航两步走规则:只要出现 search_destination,下一步必须是 start_navigation,不可省略。请重新生成合法 JSON 计划。"
+                        )
+                    )
+                    continue
                 logger.warning("LLMPlanner returned empty plan on attempt %d, continuing retry", attempt)
             except Exception as exc:  # noqa: BLE001 - 重试循环需要捕获任意 LLM/解析错误
                 last_error = str(exc)

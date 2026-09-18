@@ -5,8 +5,9 @@
 #   流程: planner → execute(循环) → respond → END
 #   输出含 tool_calls/tool_results/response,可展示完整 Plan
 
+import operator
 from functools import lru_cache
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -17,14 +18,14 @@ from app.tools.schemas import ToolCallRecord, PlanStep, ToolResult
 
 
 class PlanExecuteState(TypedDict, total=False):
-    """plan-execute 状态容器。"""
+    """plan-execute 状态容器;显式声明 Reducer 避免 list 字段被默认 ADD 导致重复追加。"""
 
-    messages: list[BaseMessage]
+    messages: Annotated[list[BaseMessage], operator.add]
     user_id: str
     session_id: str
     plan: list[PlanStep]
-    tool_calls: list[ToolCallRecord]
-    tool_results: list[ToolResult]
+    tool_calls: Annotated[list[ToolCallRecord], operator.add]
+    tool_results: Annotated[list[ToolResult], operator.add]
     response: str
 
 
