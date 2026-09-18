@@ -1,0 +1,10 @@
+{
+  "id": "vc_007",
+  "user": "关闭空调",
+  "expected_tools": [
+    "set_ac"
+  ],
+  "expected_success": true,
+  "category": "vehicle_control",
+  "expected_reject": false
+}

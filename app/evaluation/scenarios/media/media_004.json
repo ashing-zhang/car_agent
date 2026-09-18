@@ -1,0 +1,10 @@
+{
+  "id": "media_004",
+  "user": "播放我的歌单",
+  "expected_tools": [
+    "play_media"
+  ],
+  "expected_success": true,
+  "category": "media",
+  "expected_reject": false
+}

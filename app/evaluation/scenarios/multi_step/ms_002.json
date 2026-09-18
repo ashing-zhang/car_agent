@@ -1,0 +1,12 @@
+{
+  "id": "ms_002",
+  "user": "导航到机场并播放歌单",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation",
+    "play_media"
+  ],
+  "expected_success": true,
+  "category": "multi_step",
+  "expected_reject": false
+}

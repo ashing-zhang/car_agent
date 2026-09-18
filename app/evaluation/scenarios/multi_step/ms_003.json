@@ -1,0 +1,12 @@
+{
+  "id": "ms_003",
+  "user": "去商场顺便放点音乐",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation",
+    "play_media"
+  ],
+  "expected_success": true,
+  "category": "multi_step",
+  "expected_reject": false
+}

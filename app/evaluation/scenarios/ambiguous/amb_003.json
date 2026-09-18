@@ -1,0 +1,8 @@
+{
+  "id": "amb_003",
+  "user": "随便",
+  "expected_tools": [],
+  "expected_success": true,
+  "category": "ambiguous",
+  "expected_reject": false
+}

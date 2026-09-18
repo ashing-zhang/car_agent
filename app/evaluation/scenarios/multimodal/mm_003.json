@@ -1,0 +1,10 @@
+{
+  "id": "mm_003",
+  "user": "前方交通状况",
+  "expected_tools": [
+    "get_traffic"
+  ],
+  "expected_success": true,
+  "category": "multimodal",
+  "expected_reject": false
+}

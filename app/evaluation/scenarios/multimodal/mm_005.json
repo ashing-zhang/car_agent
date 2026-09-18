@@ -1,0 +1,10 @@
+{
+  "id": "mm_005",
+  "user": "外面下雨了吗",
+  "expected_tools": [
+    "get_weather"
+  ],
+  "expected_success": true,
+  "category": "multimodal",
+  "expected_reject": false
+}

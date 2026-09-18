@@ -1,0 +1,12 @@
+{
+  "id": "ms_006",
+  "user": "去学校顺便放音乐",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation",
+    "play_media"
+  ],
+  "expected_success": true,
+  "category": "multi_step",
+  "expected_reject": false
+}

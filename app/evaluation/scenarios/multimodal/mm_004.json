@@ -1,0 +1,10 @@
+{
+  "id": "mm_004",
+  "user": "看看周围环境",
+  "expected_tools": [
+    "get_camera_scene"
+  ],
+  "expected_success": true,
+  "category": "multimodal",
+  "expected_reject": false
+}

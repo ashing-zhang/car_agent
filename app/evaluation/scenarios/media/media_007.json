@@ -1,0 +1,10 @@
+{
+  "id": "media_007",
+  "user": "放点轻音乐",
+  "expected_tools": [
+    "play_media"
+  ],
+  "expected_success": true,
+  "category": "media",
+  "expected_reject": false
+}

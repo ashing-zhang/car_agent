@@ -1,0 +1,10 @@
+{
+  "id": "media_003",
+  "user": "音量调到20",
+  "expected_tools": [
+    "set_volume"
+  ],
+  "expected_success": true,
+  "category": "media",
+  "expected_reject": false
+}

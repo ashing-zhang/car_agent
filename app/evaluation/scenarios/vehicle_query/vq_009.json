@@ -1,0 +1,10 @@
+{
+  "id": "vq_009",
+  "user": "车辆状态如何",
+  "expected_tools": [
+    "get_vehicle_status"
+  ],
+  "expected_success": true,
+  "category": "vehicle_query",
+  "expected_reject": false
+}

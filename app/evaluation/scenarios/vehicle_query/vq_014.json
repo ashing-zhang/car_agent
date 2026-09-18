@@ -1,0 +1,10 @@
+{
+  "id": "vq_014",
+  "user": "电量还有多少",
+  "expected_tools": [
+    "get_vehicle_status"
+  ],
+  "expected_success": true,
+  "category": "vehicle_query",
+  "expected_reject": false
+}

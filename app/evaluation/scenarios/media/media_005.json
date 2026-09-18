@@ -1,0 +1,10 @@
+{
+  "id": "media_005",
+  "user": "把音量设为15",
+  "expected_tools": [
+    "set_volume"
+  ],
+  "expected_success": true,
+  "category": "media",
+  "expected_reject": false
+}

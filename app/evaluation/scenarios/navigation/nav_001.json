@@ -1,0 +1,11 @@
+{
+  "id": "nav_001",
+  "user": "帮我导航到公司",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation"
+  ],
+  "expected_success": true,
+  "category": "navigation",
+  "expected_reject": false
+}

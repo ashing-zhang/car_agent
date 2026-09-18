@@ -1,0 +1,10 @@
+{
+  "id": "vc_003",
+  "user": "把温度调到23度",
+  "expected_tools": [
+    "set_temperature"
+  ],
+  "expected_success": true,
+  "category": "vehicle_control",
+  "expected_reject": false
+}

@@ -1,0 +1,11 @@
+{
+  "id": "nav_002",
+  "user": "帮我导航到家",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation"
+  ],
+  "expected_success": true,
+  "category": "navigation",
+  "expected_reject": false
+}

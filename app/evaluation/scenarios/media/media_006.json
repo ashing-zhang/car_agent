@@ -1,0 +1,10 @@
+{
+  "id": "media_006",
+  "user": "停止音乐",
+  "expected_tools": [
+    "pause_media"
+  ],
+  "expected_success": true,
+  "category": "media",
+  "expected_reject": false
+}

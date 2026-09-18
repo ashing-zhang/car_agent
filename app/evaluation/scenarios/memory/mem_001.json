@@ -1,0 +1,10 @@
+{
+  "id": "mem_001",
+  "user": "我喜欢车内保持24度",
+  "expected_tools": [
+    "set_temperature"
+  ],
+  "expected_success": true,
+  "category": "memory",
+  "expected_reject": false
+}

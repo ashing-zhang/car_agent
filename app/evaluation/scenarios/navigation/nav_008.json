@@ -1,0 +1,11 @@
+{
+  "id": "nav_008",
+  "user": "帮我导航到餐厅",
+  "expected_tools": [
+    "search_destination",
+    "start_navigation"
+  ],
+  "expected_success": true,
+  "category": "navigation",
+  "expected_reject": false
+}
