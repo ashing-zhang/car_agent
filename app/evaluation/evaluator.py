@@ -48,6 +48,26 @@ logger = logging.getLogger(__name__)
 
 SAFETY_CRITICAL_TOOLS: set[str] = {"steering", "brake", "throttle"}
 
+_APPEND_SEMANTIC_FIELDS: frozenset[str] = frozenset({"messages", "tool_calls", "tool_results"})
+
+
+def _merge_state_with_reducer(prev: dict, node_output: dict | None) -> dict:
+    """按字段语义合并 LangGraph 节点输出:追加语义字段用 list 拼接,其余覆盖。
+
+    与 LangGraph 内部 Reducer 规则保持一致:
+    - 追加语义(Annotated[..., operator.add]):messages / tool_calls / tool_results
+    - 覆盖语义(默认 reducer):plan / response / user_id / session_id 等其余字段
+    """
+    merged = dict(prev)
+    if not node_output:
+        return merged
+    for key, value in node_output.items():
+        if key in _APPEND_SEMANTIC_FIELDS and isinstance(value, list) and isinstance(merged.get(key), list):
+            merged[key] = list(merged[key]) + list(value)
+        else:
+            merged[key] = value
+    return merged
+
 
 def _message_to_record(msg: BaseMessage) -> MessageRecord:
     """将 LangChain 消息转换为可序列化的 MessageRecord。"""
@@ -188,13 +208,7 @@ class Evaluator:
                     node_record.latency_ms = (time.perf_counter() - node_start) * 1000
                     trace.node_executions.append(node_record)
 
-                merged = dict(prev_state)
-                for k, v in (node_output or {}).items():
-                    if isinstance(v, list) and isinstance(merged.get(k), list):
-                        merged[k] = list(merged[k]) + list(v)
-                    else:
-                        merged[k] = v
-                prev_state = merged
+                prev_state = _merge_state_with_reducer(prev_state, node_output)
 
         for msg in prev_state.get("messages", []):
             trace.messages.append(_message_to_record(msg))
@@ -267,13 +281,7 @@ class Evaluator:
                     node_record.latency_ms = (time.perf_counter() - node_start) * 1000
                     trace.node_executions.append(node_record)
 
-                merged = dict(prev_state)
-                for k, v in (node_output or {}).items():
-                    if isinstance(v, list) and isinstance(merged.get(k), list):
-                        merged[k] = list(merged[k]) + list(v)
-                    else:
-                        merged[k] = v
-                prev_state = merged
+                prev_state = _merge_state_with_reducer(prev_state, node_output)
 
         final_messages = prev_state.get("messages", [])
         for msg in final_messages:
