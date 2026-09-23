@@ -55,3 +55,24 @@ def test_plan_agent_preserves_dependency_order() -> None:
     names = [tc.name for tc in result.get("tool_calls", [])]
     if "start_navigation" in names and "search_destination" in names:
         assert names.index("search_destination") < names.index("start_navigation")
+
+
+def test_plan_agent_no_duplicate_tool_calls() -> None:
+    """验证多步执行时 tool_calls 不重复(reducer 与手动追加冲突修复验证)。"""
+    agent = build_plan_agent()
+    result = agent.invoke(
+        {"messages": [HumanMessage(content="去公司顺便播放音乐")], "user_id": "u1", "session_id": "s"}
+    )
+    tool_calls = result.get("tool_calls", [])
+    tool_results = result.get("tool_results", [])
+    names = [tc.name for tc in tool_calls]
+    assert len(tool_calls) == len(set((tc.name, str(tc.arguments)) for tc in tool_calls)), (
+        f"tool_calls 存在重复项: {names}"
+    )
+    assert len(tool_results) == len(set((r.tool_name, r.output) for r in tool_results)), (
+        "tool_results 存在重复项"
+    )
+    expected_order = ["search_destination", "start_navigation", "play_media"]
+    for tool_name in expected_order:
+        assert names.count(tool_name) == 1, f"{tool_name} 应恰好出现 1 次,实际 {names.count(tool_name)} 次"
+    assert names.index("search_destination") < names.index("start_navigation")

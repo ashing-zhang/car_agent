@@ -63,10 +63,8 @@ def _make_execute_node(registry: ToolRegistry) -> object:
         output = registry.execute(step.tool, step.arguments)
         return {
             "plan": plan[1:],
-            "tool_calls": list(state.get("tool_calls", []))
-            + [ToolCallRecord(name=step.tool, arguments=step.arguments)],
-            "tool_results": list(state.get("tool_results", []))
-            + [ToolResult(success=True, tool_name=step.tool, output=output)],
+            "tool_calls": [ToolCallRecord(name=step.tool, arguments=step.arguments)],
+            "tool_results": [ToolResult(success=True, tool_name=step.tool, output=output)],
         }
 
     return node
